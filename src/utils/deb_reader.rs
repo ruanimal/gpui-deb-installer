@@ -29,10 +29,16 @@ fn parse_control_fields(text: &str) -> Result<DebInfo> {
     let mut current_value = String::new();
 
     for line in text.lines() {
-        // Continuation line
-        if line.starts_with(' ') || line.starts_with('\t') {
+        // dpkg-deb --info indents every line with exactly one space.
+        // Strip that one leading space to get the "logical" line.
+        // Key-value lines: "Package: foo" (starts with a letter after strip)
+        // Continuation lines: " more text" (still starts with space after strip)
+        let logical = line.strip_prefix(' ').unwrap_or(line);
+
+        if logical.starts_with(' ') || logical.starts_with('\t') || logical == "." {
+            // Continuation line of a multi-line field (e.g. Description body)
             if current_key.is_some() {
-                let trimmed = line.trim();
+                let trimmed = logical.trim();
                 if trimmed != "." {
                     if !current_value.is_empty() {
                         current_value.push('\n');
@@ -40,14 +46,15 @@ fn parse_control_fields(text: &str) -> Result<DebInfo> {
                     current_value.push_str(trimmed);
                 }
             }
-        } else if let Some(colon_pos) = line.find(':') {
-            // Save previous field
+        } else if let Some(colon_pos) = logical.find(':') {
+            // Key: value line
             if let Some(key) = current_key.take() {
                 fields.insert(key, current_value.trim().to_string());
             }
-            current_key = Some(line[..colon_pos].trim().to_lowercase());
-            current_value = line[colon_pos + 1..].trim().to_string();
+            current_key = Some(logical[..colon_pos].trim().to_lowercase());
+            current_value = logical[colon_pos + 1..].trim().to_string();
         }
+        // else: preamble lines ("新格式的 Debian 软件包...", byte counts, etc.) — ignore
     }
     // Save last field
     if let Some(key) = current_key.take() {
