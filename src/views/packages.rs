@@ -1,5 +1,5 @@
 use gpui::{
-    Context, FontWeight, IntoElement, ParentElement, Render, Styled, Window, div,
+    App, Context, FontWeight, IntoElement, ParentElement, Render, Styled, WeakEntity, Window, div,
     prelude::FluentBuilder,
 };
 use gpui_component::{
@@ -7,14 +7,20 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
 };
+use std::sync::Arc;
 
 use crate::models::{db, package::InstalledPackage};
+use crate::views::install::InstallView;
 
 pub struct PackagesView {
     rows: Vec<InstalledPackage>,
     /// Package name pending uninstall confirmation.
     confirm_target: Option<String>,
     status_msg: Option<String>,
+    /// Weak handle to InstallView, used to delegate the uninstall operation.
+    pub install_view: Option<WeakEntity<InstallView>>,
+    /// Called before uninstall starts — used by AppView to switch to the Install tab.
+    pub on_tab_switch: Option<Arc<dyn Fn(&mut App) + 'static>>,
 }
 
 impl PackagesView {
@@ -23,6 +29,8 @@ impl PackagesView {
             rows: db::load_packages().unwrap_or_default(),
             confirm_target: None,
             status_msg: None,
+            install_view: None,
+            on_tab_switch: None,
         }
     }
 
@@ -42,35 +50,21 @@ impl PackagesView {
             Some(n) => n,
             None => return,
         };
-        self.status_msg = None;
         cx.notify();
 
-        cx.spawn_in(window, async move |weak, cx| {
-            let pkg_name = name.clone();
-            let result = cx
-                .background_executor()
-                .spawn(async move { crate::utils::dpkg::remove_package(&pkg_name) })
-                .await;
+        // Switch to the Install tab so the user sees the streaming log.
+        if let Some(ref f) = self.on_tab_switch {
+            f(cx);
+        }
 
-            match result {
-                Ok(_output) => {
-                    let _ = db::remove_package(&name);
-                    weak.update(cx, |view, cx| {
-                        view.status_msg = Some(format!("Package '{}' removed.", name));
-                        view.reload(cx);
-                    })
-                    .ok();
-                }
-                Err(e) => {
-                    weak.update(cx, |view, cx| {
-                        view.status_msg = Some(format!("Uninstall failed: {}", e));
-                        cx.notify();
-                    })
-                    .ok();
-                }
-            }
-        })
-        .detach();
+        // Delegate to InstallView's streaming uninstall logic.
+        if let Some(ref install_weak) = self.install_view {
+            install_weak
+                .update(cx, |install, install_cx| {
+                    install.start_uninstall_by_name(name, window, install_cx);
+                })
+                .ok();
+        }
     }
 
     fn cancel_confirm(&mut self, cx: &mut Context<Self>) {

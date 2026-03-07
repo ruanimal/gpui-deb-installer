@@ -100,26 +100,4 @@ pub fn installed_version(name: &str) -> Option<String> {
     }
 }
 
-/// Removes a package using `pkexec apt remove --yes`.
-/// Returns the combined stdout+stderr output on success.
-pub fn remove_package(name: &str) -> Result<String> {
-    let output = Command::new("pkexec")
-        .args(["apt", "remove", "--yes"])
-        .arg(name)
-        .output()
-        .context("failed to launch pkexec apt remove")?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = format!("{}{}", stdout, stderr);
-
-    if output.status.success() {
-        Ok(combined)
-    } else {
-        bail!(
-            "apt remove failed (exit {}): {}",
-            output.status,
-            combined
-        );
-    }
-}

@@ -1,4 +1,5 @@
 use gpui::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
+use std::sync::Arc;
 use gpui_component::{
     ActiveTheme,
     tab::{Tab, TabBar},
@@ -18,14 +19,31 @@ impl AppView {
         let packages_view = cx.new(|cx| PackagesView::new(window, cx));
         let install_view = cx.new(|cx| InstallView::new(window, cx));
 
-        // Wire up the installed callback: when a package is installed, reload packages.
+        // When a package is installed/uninstalled, reload the Installed list.
         {
             let packages_weak = packages_view.downgrade();
             install_view.update(cx, |view, _cx| {
-                view.on_installed = Some(std::sync::Arc::new(move |_window: &mut Window, cx: &mut App| {
+                view.on_installed = Some(Arc::new(move |_window: &mut Window, cx: &mut App| {
                     packages_weak
                         .update(cx, |packages, cx| {
                             packages.reload(cx);
+                        })
+                        .ok();
+                }));
+            });
+        }
+
+        // Wire PackagesView → InstallView for delegated uninstall.
+        {
+            let app_weak = cx.weak_entity();
+            let install_weak = install_view.downgrade();
+            packages_view.update(cx, |view, _cx| {
+                view.install_view = Some(install_weak);
+                view.on_tab_switch = Some(Arc::new(move |cx: &mut App| {
+                    app_weak
+                        .update(cx, |app, cx| {
+                            app.active_tab = 0;
+                            cx.notify();
                         })
                         .ok();
                 }));

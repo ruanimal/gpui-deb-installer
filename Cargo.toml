@@ -2,10 +2,25 @@
 name = "gpui-deb-installer"
 version = "0.1.0"
 edition = "2021"
+description = "A graphical .deb package installer"
 
 [[bin]]
 name = "gpui-deb-installer"
 path = "src/main.rs"
+
+[package.metadata.deb]
+maintainer = "rlj"
+copyright = "2025, rlj"
+extended-description = "A graphical .deb package installer built with the gpui framework.\nSupports installing, reinstalling, upgrading, and removing .deb packages."
+depends = "$auto, policykit-1, dpkg, apt"
+section = "admin"
+priority = "optional"
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/gpui-deb-installer", "usr/bin/gpui-deb-installer", "755"],
+    ["icon.svg", "usr/share/icons/hicolor/scalable/apps/gpui-deb-installer.svg", "644"],
+    ["assets/gpui-deb-installer.desktop", "usr/share/applications/gpui-deb-installer.desktop", "644"],
+]
 
 [dependencies]
 gpui = "0.2.2"

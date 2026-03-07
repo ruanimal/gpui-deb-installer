@@ -370,7 +370,11 @@ impl InstallView {
             InstallState::FileSelected { info, .. } => info.name.clone(),
             _ => return,
         };
+        self.start_uninstall_by_name(pkg_name, window, cx);
+    }
 
+    /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
+    pub fn start_uninstall_by_name(&mut self, pkg_name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: String::new() };
         cx.notify();
 
