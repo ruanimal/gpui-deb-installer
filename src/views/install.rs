@@ -193,7 +193,7 @@ impl InstallView {
 
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
-                        view.show_log = false;
+                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' installed successfully.", pkg_name),
                             success: true,
@@ -209,7 +209,7 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
-                        view.show_log = false;
+                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: "Installation failed.".to_string(),
                             success: false,
@@ -270,7 +270,7 @@ impl InstallView {
                 Ok(()) => {
                     let _ = db::remove_package(&pkg_name);
                     weak.update(cx, |view, cx| {
-                        view.show_log = false;
+                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' uninstalled successfully.", pkg_name),
                             success: true,
@@ -285,7 +285,7 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
-                        view.show_log = false;
+                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: "Uninstall failed.".to_string(),
                             success: false,
