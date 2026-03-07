@@ -1,14 +1,14 @@
 use chrono::Utc;
 use gpui::{
     App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, StatefulInteractiveElement, Styled, VisualContext, Window, div,
-    prelude::FluentBuilder,
+    PathPromptOptions, Render, StatefulInteractiveElement, Styled, Subscription, VisualContext,
+    Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
     ActiveTheme,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -58,24 +58,60 @@ struct InfoInputs {
 pub struct InstallView {
     state: InstallState,
     info_inputs: InfoInputs,
+    _subscriptions: Vec<Subscription>,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl InstallView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let inputs = InfoInputs {
+            name: cx.new(|cx| InputState::new(window, cx)),
+            version: cx.new(|cx| InputState::new(window, cx)),
+            path: cx.new(|cx| InputState::new(window, cx)),
+            description: cx.new(|cx| InputState::new(window, cx)),
+            maintainer: cx.new(|cx| InputState::new(window, cx)),
+            size: cx.new(|cx| InputState::new(window, cx)),
+            section: cx.new(|cx| InputState::new(window, cx)),
+            depends: cx.new(|cx| InputState::new(window, cx)),
+        };
+
+        // When any one input gains focus, unselect all the others.
+        let all: Vec<Entity<InputState>> = vec![
+            inputs.name.clone(),
+            inputs.version.clone(),
+            inputs.path.clone(),
+            inputs.description.clone(),
+            inputs.maintainer.clone(),
+            inputs.size.clone(),
+            inputs.section.clone(),
+            inputs.depends.clone(),
+        ];
+        let mut subscriptions = Vec::new();
+        for (i, focused) in all.iter().enumerate() {
+            let others: Vec<Entity<InputState>> = all
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, e)| e.clone())
+                .collect();
+            subscriptions.push(cx.subscribe_in(
+                focused,
+                window,
+                move |_view, _emitter, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Focus) {
+                        for other in &others {
+                            cx.update_entity(other, |s, cx| s.unselect(window, cx));
+                        }
+                    }
+                },
+            ));
+        }
+
         Self {
             state: InstallState::Idle,
-            info_inputs: InfoInputs {
-                name: cx.new(|cx| InputState::new(window, cx)),
-                version: cx.new(|cx| InputState::new(window, cx)),
-                path: cx.new(|cx| InputState::new(window, cx)),
-                description: cx.new(|cx| InputState::new(window, cx)),
-                maintainer: cx.new(|cx| InputState::new(window, cx)),
-                size: cx.new(|cx| InputState::new(window, cx)),
-                section: cx.new(|cx| InputState::new(window, cx)),
-                depends: cx.new(|cx| InputState::new(window, cx)),
-            },
+            info_inputs: inputs,
+            _subscriptions: subscriptions,
             on_installed: None,
         }
     }
