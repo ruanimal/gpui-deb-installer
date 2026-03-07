@@ -42,7 +42,6 @@ pub enum InstallState {
 
 pub struct InstallView {
     state: InstallState,
-    show_log: bool,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
@@ -51,7 +50,6 @@ impl InstallView {
     pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {
             state: InstallState::Idle,
-            show_log: false,
             on_installed: None,
         }
     }
@@ -193,7 +191,6 @@ impl InstallView {
 
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
-                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' installed successfully.", pkg_name),
                             success: true,
@@ -209,7 +206,6 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
-                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: "Installation failed.".to_string(),
                             success: false,
@@ -270,7 +266,6 @@ impl InstallView {
                 Ok(()) => {
                     let _ = db::remove_package(&pkg_name);
                     weak.update(cx, |view, cx| {
-                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' uninstalled successfully.", pkg_name),
                             success: true,
@@ -285,7 +280,6 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
-                        view.show_log = true;
                         view.state = InstallState::Done {
                             message: "Uninstall failed.".to_string(),
                             success: false,
@@ -302,7 +296,6 @@ impl InstallView {
 
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
-        self.show_log = false;
         cx.notify();
     }
 }
@@ -331,13 +324,13 @@ impl Render for InstallView {
                     )
                 }
                 InstallState::Installing { info, log } => {
-                    render_in_progress(&format!("Installing '{}'…", info.name), log, cx)
+                    render_with_log(&format!("Installing '{}'…", info.name), log, None, cx)
                 }
                 InstallState::Uninstalling { pkg_name, log } => {
-                    render_in_progress(&format!("Uninstalling '{}'…", pkg_name), log, cx)
+                    render_with_log(&format!("Uninstalling '{}'…", pkg_name), log, None, cx)
                 }
                 InstallState::Done { message, success, log } => {
-                    render_done(message.clone(), *success, log.clone(), self.show_log, cx)
+                    render_with_log("", log, Some((*success, message.clone())), cx)
                 }
             })
     }
@@ -531,9 +524,13 @@ fn render_file_selected(
         .into_any_element()
 }
 
-fn render_in_progress(
+/// Unified renderer for the in-progress and done states.
+/// - `done = None`            → in-progress: shows title + live log, no Back button
+/// - `done = Some((ok, msg))` → finished: swaps title for result banner, shows Back button
+fn render_with_log(
     title: &str,
     log: &str,
+    done: Option<(bool, String)>,
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
     let log_text = if log.is_empty() {
@@ -541,18 +538,31 @@ fn render_in_progress(
     } else {
         log.to_string()
     };
+    let is_done = done.is_some();
 
     v_flex()
         .flex_1()
         .gap_3()
-        // Title
-        .child(
-            div()
+        // Header: result banner when done, plain title when in-progress
+        .child(match done {
+            Some((success, message)) => {
+                let border_color = if success { cx.theme().success } else { cx.theme().danger };
+                h_flex()
+                    .px_4()
+                    .py_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(border_color)
+                    .child(div().flex_1().child(message))
+                    .into_any_element()
+            }
+            None => div()
                 .text_color(cx.theme().foreground)
                 .font_weight(gpui::FontWeight::BOLD)
-                .child(title.to_string()),
-        )
-        // Live log panel
+                .child(title.to_string())
+                .into_any_element(),
+        })
+        // Log panel (always visible)
         .child(
             v_flex()
                 .flex_1()
@@ -584,94 +594,16 @@ fn render_in_progress(
                         .child(log_text),
                 ),
         )
-        .into_any_element()
-}
-
-fn render_done(
-    message: String,
-    success: bool,
-    log: String,
-    show_log: bool,
-    cx: &mut Context<InstallView>,
-) -> gpui::AnyElement {
-    let border_color = if success {
-        cx.theme().success
-    } else {
-        cx.theme().danger
-    };
-    let toggle_label = if show_log { "Hide Details" } else { "Show Details" };
-
-    v_flex()
-        .flex_1()
-        .p_2()
-        .gap_3()
-        // Result banner
-        .child(
-            h_flex()
-                .gap_3()
-                .items_center()
-                .px_4()
-                .py_3()
-                .rounded_lg()
-                .border_1()
-                .border_color(border_color)
-                .child(div().flex_1().child(message))
-                .child(
-                    Button::new("toggle-log-btn")
-                        .ghost()
-                        .label(toggle_label)
-                        .on_click(cx.listener(|view, _ev, _window, cx| {
-                            view.show_log = !view.show_log;
-                            cx.notify();
-                        })),
-                ),
-        )
-        // Log panel (collapsible)
-        .when(show_log, |el| {
+        // Back button appears only after completion
+        .when(is_done, |el| {
             el.child(
-                v_flex()
-                    .flex_1()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .bg(cx.theme().tab_bar)
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Output log"),
-                    )
-                    .child(
-                        div()
-                            .id("log-scroll")
-                            .flex_1()
-                            .p_3()
-                            .overflow_y_scroll()
-                            .font_family("monospace")
-                            .text_sm()
-                            .text_color(cx.theme().foreground)
-                            .child(if log.is_empty() {
-                                "(no output)".to_string()
-                            } else {
-                                log
-                            }),
-                    ),
+                Button::new("reset-btn")
+                    .label("Back")
+                    .on_click(cx.listener(|view, _ev, _window, cx| {
+                        view.reset(cx);
+                    })),
             )
         })
-        // Action button
-        .child(
-            Button::new("reset-btn")
-                .label("Back")
-                .on_click(cx.listener(|view, _ev, _window, cx| {
-                    view.reset(cx);
-                })),
-        )
         .into_any_element()
 }
 
