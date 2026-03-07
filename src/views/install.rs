@@ -32,6 +32,7 @@ pub enum InstallState {
         installed_version: Option<String>,
     },
     Installing { info: DebInfo },
+    Uninstalling { pkg_name: String },
     Done { message: String, success: bool },
 }
 
@@ -190,6 +191,54 @@ impl InstallView {
         .detach();
     }
 
+    fn uninstall_package(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pkg_name = match &self.state {
+            InstallState::FileSelected { info, .. } => info.name.clone(),
+            _ => return,
+        };
+
+        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone() };
+        cx.notify();
+
+        let on_installed = self.on_installed.clone();
+
+        cx.spawn_in(window, async move |weak, cx| {
+            let name = pkg_name.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { dpkg::remove_package(&name) })
+                .await;
+
+            match result {
+                Ok(_) => {
+                    let _ = db::remove_package(&pkg_name);
+                    weak.update(cx, |view, cx| {
+                        view.state = InstallState::Done {
+                            message: format!("Package '{}' uninstalled successfully.", pkg_name),
+                            success: true,
+                        };
+                        cx.notify();
+                    })
+                    .ok();
+                    if let Some(cb) = on_installed {
+                        cx.update(|window, cx| cb(window, cx)).ok();
+                    }
+                }
+                Err(e) => {
+                    weak.update(cx, |view, cx| {
+                        view.state = InstallState::Done {
+                            message: format!("Uninstall failed: {}", e),
+                            success: false,
+                        };
+                        cx.notify();
+                    })
+                    .ok();
+                }
+            }
+        })
+        .detach();
+    }
+
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
         cx.notify();
@@ -220,6 +269,7 @@ impl Render for InstallView {
                     )
                 }
                 InstallState::Installing { info } => render_installing(&info.name),
+                InstallState::Uninstalling { pkg_name } => render_uninstalling(pkg_name),
                 InstallState::Done { message, success } => {
                     render_done(message.clone(), *success, cx)
                 }
@@ -393,6 +443,17 @@ fn render_file_selected(
                             view.install_package(window, cx);
                         })),
                 )
+                // Show uninstall button only when already installed
+                .when(installed_version.is_some(), |el| {
+                    el.child(
+                        Button::new("uninstall-btn")
+                            .danger()
+                            .label("Uninstall")
+                            .on_click(cx.listener(|view, _ev, window, cx| {
+                                view.uninstall_package(window, cx);
+                            })),
+                    )
+                })
                 .child(
                     Button::new("cancel-btn")
                         .label("Cancel")
@@ -401,6 +462,17 @@ fn render_file_selected(
                         })),
                 ),
         )
+        .into_any_element()
+}
+
+fn render_uninstalling(pkg_name: &str) -> gpui::AnyElement {
+    v_flex()
+        .flex_1()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .child(div().child(format!("Uninstalling '{}'…", pkg_name)))
+        .child(div().text_sm().child("Waiting for pkexec authentication…"))
         .into_any_element()
 }
 
