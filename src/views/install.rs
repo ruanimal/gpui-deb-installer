@@ -1,7 +1,7 @@
 use chrono::Utc;
 use gpui::{
-    App, Context, IntoElement, ParentElement, PathPromptOptions, Render, Styled, Window,
-    div, prelude::FluentBuilder,
+    App, Context, InteractiveElement, IntoElement, ParentElement, PathPromptOptions, Render,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
     ActiveTheme,
@@ -31,9 +31,9 @@ pub enum InstallState {
         /// Version already installed on the system, if any.
         installed_version: Option<String>,
     },
-    Installing { info: DebInfo },
-    Uninstalling { pkg_name: String },
-    Done { message: String, success: bool },
+    Installing { info: DebInfo, log: String },
+    Uninstalling { pkg_name: String, log: String },
+    Done { message: String, success: bool, log: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,8 @@ pub enum InstallState {
 
 pub struct InstallView {
     state: InstallState,
-    /// Called when a package is successfully installed.
+    show_log: bool,
+    /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
@@ -50,6 +51,7 @@ impl InstallView {
     pub fn new(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
         Self {
             state: InstallState::Idle,
+            show_log: false,
             on_installed: None,
         }
     }
@@ -82,6 +84,7 @@ impl InstallView {
                             view.state = InstallState::Done {
                                 message: "Selected file is not a .deb package.".into(),
                                 success: false,
+                                log: String::new(),
                             };
                             cx.notify();
                         })
@@ -118,6 +121,7 @@ impl InstallView {
                             Err(e) => InstallState::Done {
                                 message: format!("Failed to read .deb info: {}", e),
                                 success: false,
+                                log: String::new(),
                             },
                         };
                         cx.notify();
@@ -136,21 +140,47 @@ impl InstallView {
             _ => return,
         };
 
-        self.state = InstallState::Installing { info: info.clone() };
+        self.state = InstallState::Installing { info: info.clone(), log: String::new() };
         cx.notify();
 
-        // Clone the callback so we can call it from the async closure
         let on_installed = self.on_installed.clone();
 
         cx.spawn_in(window, async move |weak, cx| {
+            let (log_tx, log_rx) = async_channel::unbounded::<String>();
+
+            // Background: run command, stream lines to log_tx
             let path_bg = path.clone();
-            let result = cx
+            let result_task = cx
                 .background_executor()
-                .spawn(async move { dpkg::install_deb(&path_bg) })
-                .await;
+                .spawn(async move { dpkg::install_deb_streaming(path_bg, log_tx) });
+
+            // Foreground: receive lines and update UI in real-time
+            while let Ok(line) = log_rx.recv().await {
+                let l = line.clone();
+                weak.update(cx, |view, cx| {
+                    if let InstallState::Installing { ref mut log, .. } = view.state {
+                        if !log.is_empty() {
+                            log.push('\n');
+                        }
+                        log.push_str(&l);
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+
+            // Command finished — collect log and result
+            let final_log = weak
+                .read_with(cx, |view, _| match &view.state {
+                    InstallState::Installing { log, .. } => log.clone(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+
+            let result = result_task.await;
 
             match result {
-                Ok(_output) => {
+                Ok(()) => {
                     let pkg = InstalledPackage {
                         name: info.name.clone(),
                         version: info.version.clone(),
@@ -163,24 +193,27 @@ impl InstallView {
 
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
+                        view.show_log = false;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' installed successfully.", pkg_name),
                             success: true,
+                            log: final_log,
                         };
                         cx.notify();
                     })
                     .ok();
 
-                    // Fire the reload callback
                     if let Some(cb) = on_installed {
                         cx.update(|window, cx| cb(window, cx)).ok();
                     }
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
+                        view.show_log = false;
                         view.state = InstallState::Done {
-                            message: format!("Installation failed: {}", e),
+                            message: "Installation failed.".to_string(),
                             success: false,
+                            log: format!("{}\n{}", final_log, e),
                         };
                         cx.notify();
                     })
@@ -197,25 +230,51 @@ impl InstallView {
             _ => return,
         };
 
-        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone() };
+        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: String::new() };
         cx.notify();
 
         let on_installed = self.on_installed.clone();
 
         cx.spawn_in(window, async move |weak, cx| {
-            let name = pkg_name.clone();
-            let result = cx
+            let (log_tx, log_rx) = async_channel::unbounded::<String>();
+
+            let name_bg = pkg_name.clone();
+            let result_task = cx
                 .background_executor()
-                .spawn(async move { dpkg::remove_package(&name) })
-                .await;
+                .spawn(async move { dpkg::remove_package_streaming(name_bg, log_tx) });
+
+            while let Ok(line) = log_rx.recv().await {
+                let l = line.clone();
+                weak.update(cx, |view, cx| {
+                    if let InstallState::Uninstalling { ref mut log, .. } = view.state {
+                        if !log.is_empty() {
+                            log.push('\n');
+                        }
+                        log.push_str(&l);
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }
+
+            let final_log = weak
+                .read_with(cx, |view, _| match &view.state {
+                    InstallState::Uninstalling { log, .. } => log.clone(),
+                    _ => String::new(),
+                })
+                .unwrap_or_default();
+
+            let result = result_task.await;
 
             match result {
-                Ok(_) => {
+                Ok(()) => {
                     let _ = db::remove_package(&pkg_name);
                     weak.update(cx, |view, cx| {
+                        view.show_log = false;
                         view.state = InstallState::Done {
                             message: format!("Package '{}' uninstalled successfully.", pkg_name),
                             success: true,
+                            log: final_log,
                         };
                         cx.notify();
                     })
@@ -226,9 +285,11 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
+                        view.show_log = false;
                         view.state = InstallState::Done {
-                            message: format!("Uninstall failed: {}", e),
+                            message: "Uninstall failed.".to_string(),
                             success: false,
+                            log: format!("{}\n{}", final_log, e),
                         };
                         cx.notify();
                     })
@@ -241,6 +302,7 @@ impl InstallView {
 
     fn reset(&mut self, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
+        self.show_log = false;
         cx.notify();
     }
 }
@@ -268,10 +330,14 @@ impl Render for InstallView {
                         cx,
                     )
                 }
-                InstallState::Installing { info } => render_installing(&info.name),
-                InstallState::Uninstalling { pkg_name } => render_uninstalling(pkg_name),
-                InstallState::Done { message, success } => {
-                    render_done(message.clone(), *success, cx)
+                InstallState::Installing { info, log } => {
+                    render_in_progress(&format!("Installing '{}'…", info.name), log, cx)
+                }
+                InstallState::Uninstalling { pkg_name, log } => {
+                    render_in_progress(&format!("Uninstalling '{}'…", pkg_name), log, cx)
+                }
+                InstallState::Done { message, success, log } => {
+                    render_done(message.clone(), *success, log.clone(), self.show_log, cx)
                 }
             })
     }
@@ -465,52 +531,143 @@ fn render_file_selected(
         .into_any_element()
 }
 
-fn render_uninstalling(pkg_name: &str) -> gpui::AnyElement {
+fn render_in_progress(
+    title: &str,
+    log: &str,
+    cx: &mut Context<InstallView>,
+) -> gpui::AnyElement {
+    let log_text = if log.is_empty() {
+        "Waiting for pkexec authentication…".to_string()
+    } else {
+        log.to_string()
+    };
+
     v_flex()
         .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .child(div().child(format!("Uninstalling '{}'…", pkg_name)))
-        .child(div().text_sm().child("Waiting for pkexec authentication…"))
+        .gap_3()
+        // Title
+        .child(
+            div()
+                .text_color(cx.theme().foreground)
+                .font_weight(gpui::FontWeight::BOLD)
+                .child(title.to_string()),
+        )
+        // Live log panel
+        .child(
+            v_flex()
+                .flex_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().background)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .bg(cx.theme().tab_bar)
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child("Output"),
+                )
+                .child(
+                    div()
+                        .id("install-log-scroll")
+                        .flex_1()
+                        .p_3()
+                        .overflow_y_scroll()
+                        .font_family("monospace")
+                        .text_sm()
+                        .text_color(cx.theme().foreground)
+                        .child(log_text),
+                ),
+        )
         .into_any_element()
 }
 
-fn render_installing(pkg_name: &str) -> gpui::AnyElement {
-    v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .child(div().child(format!("Installing '{}'…", pkg_name)))
-        .child(div().text_sm().child("Waiting for pkexec authentication…"))
-        .into_any_element()
-}
-
-fn render_done(message: String, success: bool, cx: &mut Context<InstallView>) -> gpui::AnyElement {
+fn render_done(
+    message: String,
+    success: bool,
+    log: String,
+    show_log: bool,
+    cx: &mut Context<InstallView>,
+) -> gpui::AnyElement {
     let border_color = if success {
         cx.theme().success
     } else {
         cx.theme().danger
     };
+    let toggle_label = if show_log { "Hide Details" } else { "Show Details" };
 
     v_flex()
         .flex_1()
-        .items_center()
-        .justify_center()
-        .gap_4()
+        .p_2()
+        .gap_3()
+        // Result banner
         .child(
-            div()
+            h_flex()
+                .gap_3()
+                .items_center()
                 .px_4()
                 .py_3()
                 .rounded_lg()
                 .border_1()
                 .border_color(border_color)
-                .child(message),
+                .child(div().flex_1().child(message))
+                .child(
+                    Button::new("toggle-log-btn")
+                        .ghost()
+                        .label(toggle_label)
+                        .on_click(cx.listener(|view, _ev, _window, cx| {
+                            view.show_log = !view.show_log;
+                            cx.notify();
+                        })),
+                ),
         )
+        // Log panel (collapsible)
+        .when(show_log, |el| {
+            el.child(
+                v_flex()
+                    .flex_1()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .bg(cx.theme().tab_bar)
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("Output log"),
+                    )
+                    .child(
+                        div()
+                            .id("log-scroll")
+                            .flex_1()
+                            .p_3()
+                            .overflow_y_scroll()
+                            .font_family("monospace")
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .child(if log.is_empty() {
+                                "(no output)".to_string()
+                            } else {
+                                log
+                            }),
+                    ),
+            )
+        })
+        // Action button
         .child(
             Button::new("reset-btn")
-                .label("Install Another")
+                .label("Back")
                 .on_click(cx.listener(|view, _ev, _window, cx| {
                     view.reset(cx);
                 })),
