@@ -448,6 +448,20 @@ impl InstallView {
         self.state = InstallState::Idle;
         cx.notify();
     }
+
+    /// Returns Markdown content for the Dependencies tab.
+    pub fn deps_markdown(&self) -> String {
+        match &self.state {
+            InstallState::FileSelected { info, .. } => {
+                if info.depends.is_empty() {
+                    "_No dependencies._".to_string()
+                } else {
+                    info.depends.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
+                }
+            }
+            _ => "_Select a .deb file in the **Install** tab to view its dependencies._".to_string(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

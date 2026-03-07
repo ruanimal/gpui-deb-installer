@@ -3,6 +3,7 @@ use std::sync::Arc;
 use gpui_component::{
     ActiveTheme,
     tab::{Tab, TabBar},
+    text::TextView,
     v_flex,
 };
 
@@ -59,7 +60,9 @@ impl AppView {
 }
 
 impl Render for AppView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let deps_md = self.install_view.read(cx).deps_markdown();
+
         v_flex()
             .size_full()
             .bg(cx.theme().background)
@@ -71,6 +74,7 @@ impl Render for AppView {
                         cx.notify();
                     }))
                     .child(Tab::new().label("Install"))
+                    .child(Tab::new().label("Dependencies"))
                     .child(Tab::new().label("Installed")),
             )
             .child(
@@ -81,6 +85,15 @@ impl Render for AppView {
                         el.child(self.install_view.clone())
                     })
                     .when(self.active_tab == 1, |el| {
+                        el.child(
+                            div().size_full().p_4().child(
+                                TextView::markdown("deps-view", deps_md, window, cx)
+                                    .scrollable(true)
+                                    .selectable(true),
+                            ),
+                        )
+                    })
+                    .when(self.active_tab == 2, |el| {
                         el.child(self.packages_view.clone())
                     }),
             )
