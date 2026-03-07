@@ -53,7 +53,6 @@ struct InfoInputs {
     maintainer: Entity<InputState>,
     size: Entity<InputState>,
     section: Entity<InputState>,
-    depends: Entity<InputState>,
 }
 
 pub struct InstallView {
@@ -74,7 +73,6 @@ impl InstallView {
             maintainer: cx.new(|cx| InputState::new(window, cx)),
             size: cx.new(|cx| InputState::new(window, cx)),
             section: cx.new(|cx| InputState::new(window, cx)),
-            depends: cx.new(|cx| InputState::new(window, cx)),
         };
 
         // When any one input gains focus, unselect all the others.
@@ -86,7 +84,6 @@ impl InstallView {
             inputs.maintainer.clone(),
             inputs.size.clone(),
             inputs.section.clone(),
-            inputs.depends.clone(),
         ];
         let mut subscriptions = Vec::new();
         for (i, focused) in all.iter().enumerate() {
@@ -474,7 +471,6 @@ async fn load_deb_async(
                         view.info_inputs.maintainer.clone(),
                         view.info_inputs.size.clone(),
                         view.info_inputs.section.clone(),
-                        view.info_inputs.depends.clone(),
                     )
                 })
                 .ok();
@@ -495,7 +491,7 @@ async fn load_deb_async(
             .ok();
 
             // Populate the selectable input fields
-            if let Some((ne, ve, pe, de, me, se, ste, dpe)) = entities {
+            if let Some((ne, ve, pe, de, me, se, ste)) = entities {
                 let name_v = info.name.clone();
                 let ver_v = format!("v{} ({})", info.version, info.architecture);
                 let path_v = path_str;
@@ -507,7 +503,6 @@ async fn load_deb_async(
                     "unknown".to_string()
                 };
                 let sect_v = info.section.clone().unwrap_or_default();
-                let dep_v = info.depends.join(", ");
 
                 cx.update_window_entity(&ne, |s, w, cx| s.set_value(name_v, w, cx)).ok();
                 cx.update_window_entity(&ve, |s, w, cx| s.set_value(ver_v, w, cx)).ok();
@@ -516,7 +511,6 @@ async fn load_deb_async(
                 cx.update_window_entity(&me, |s, w, cx| s.set_value(maint_v, w, cx)).ok();
                 cx.update_window_entity(&se, |s, w, cx| s.set_value(size_v, w, cx)).ok();
                 cx.update_window_entity(&ste, |s, w, cx| s.set_value(sect_v, w, cx)).ok();
-                cx.update_window_entity(&dpe, |s, w, cx| s.set_value(dep_v, w, cx)).ok();
             }
         }
         Err(e) => {
@@ -628,8 +622,7 @@ fn render_file_selected(
                 .child(info_row_input("Description", &inputs.description, cx))
                 .child(info_row_input("Maintainer", &inputs.maintainer, cx))
                 .child(info_row_input("Installed size", &inputs.size, cx))
-                .child(info_row_input("Section", &inputs.section, cx))
-                .child(info_row_input("Depends", &inputs.depends, cx)),
+                .child(info_row_input("Section", &inputs.section, cx)),
         )
         .child(
             h_flex()
