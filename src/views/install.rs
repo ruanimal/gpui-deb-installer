@@ -1,7 +1,7 @@
 use chrono::Utc;
 use gpui::{
-    App, AppContext, Context, Entity, IntoElement, ParentElement,
-    PathPromptOptions, Render, Styled, Subscription, VisualContext,
+    App, AppContext, AsyncWindowContext, Context, Entity, IntoElement, ParentElement,
+    PathPromptOptions, Render, Styled, Subscription, VisualContext, WeakEntity,
     Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
@@ -65,7 +65,7 @@ pub struct InstallView {
 }
 
 impl InstallView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let inputs = InfoInputs {
             name: cx.new(|cx| InputState::new(window, cx)),
             version: cx.new(|cx| InputState::new(window, cx)),
@@ -109,17 +109,35 @@ impl InstallView {
             ));
         }
 
-        Self {
+        let mut view = Self {
             state: InstallState::Idle,
             info_inputs: inputs,
             _subscriptions: subscriptions,
             on_installed: None,
+        };
+
+        // If an initial deb path was provided, schedule loading it
+        if let Some(path) = initial_deb_path {
+            view.load_deb_file(path, window, cx);
         }
+
+        view
     }
 
     // -----------------------------------------------------------------------
     // Actions
     // -----------------------------------------------------------------------
+
+    fn load_deb_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let path_str = path.to_string_lossy().to_string();
+        self.state = InstallState::LoadingInfo(path.clone());
+        cx.notify();
+
+        cx.spawn_in(window, async move |weak, cx| {
+            load_deb_async(path, path_str, weak, cx).await;
+        })
+        .detach();
+    }
 
     fn select_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |weak, cx| {
@@ -154,123 +172,13 @@ impl InstallView {
                     }
 
                     let path_str = path.to_string_lossy().to_string();
-                    let path_for_state = path.clone();
                     weak.update(cx, |view, cx| {
-                        view.state = InstallState::LoadingInfo(path_for_state);
+                        view.state = InstallState::LoadingInfo(path.clone());
                         cx.notify();
                     })
                     .ok();
 
-                    // Read deb info AND check system installation status in one background task.
-                    let result = cx
-                        .background_executor()
-                        .spawn(async move {
-                            let info = deb_reader::read_deb_info(&path)?;
-                            let installed = dpkg::installed_version(&info.name);
-                            Ok::<_, anyhow::Error>((info, installed))
-                        })
-                        .await;
-
-                    match result {
-                        Ok((info, installed_version)) => {
-                            // Collect entity handles before updating state
-                            let entities = weak
-                                .read_with(cx, |view, _| {
-                                    (
-                                        view.info_inputs.name.clone(),
-                                        view.info_inputs.version.clone(),
-                                        view.info_inputs.path.clone(),
-                                        view.info_inputs.description.clone(),
-                                        view.info_inputs.maintainer.clone(),
-                                        view.info_inputs.size.clone(),
-                                        view.info_inputs.section.clone(),
-                                        view.info_inputs.depends.clone(),
-                                    )
-                                })
-                                .ok();
-
-                            // Transition to FileSelected
-                            weak.update(cx, |view, cx| {
-                                let p = match &view.state {
-                                    InstallState::LoadingInfo(p) => p.clone(),
-                                    _ => PathBuf::new(),
-                                };
-                                view.state = InstallState::FileSelected {
-                                    path: p,
-                                    info: info.clone(),
-                                    installed_version,
-                                };
-                                cx.notify();
-                            })
-                            .ok();
-
-                            // Populate the selectable input fields
-                            if let Some((ne, ve, pe, de, me, se, ste, dpe)) = entities {
-                                let name_v = info.name.clone();
-                                let ver_v =
-                                    format!("v{} ({})", info.version, info.architecture);
-                                let path_v = path_str;
-                                let desc_v = info
-                                    .description
-                                    .lines()
-                                    .next()
-                                    .unwrap_or("")
-                                    .to_string();
-                                let maint_v = info.maintainer.clone();
-                                let size_v = if info.installed_size_kb > 0 {
-                                    format!("{} KB", info.installed_size_kb)
-                                } else {
-                                    "unknown".to_string()
-                                };
-                                let sect_v = info.section.clone().unwrap_or_default();
-                                let dep_v = info.depends.join(", ");
-
-                                cx.update_window_entity(&ne, |s, w, cx| {
-                                    s.set_value(name_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&ve, |s, w, cx| {
-                                    s.set_value(ver_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&pe, |s, w, cx| {
-                                    s.set_value(path_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&de, |s, w, cx| {
-                                    s.set_value(desc_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&me, |s, w, cx| {
-                                    s.set_value(maint_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&se, |s, w, cx| {
-                                    s.set_value(size_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&ste, |s, w, cx| {
-                                    s.set_value(sect_v, w, cx)
-                                })
-                                .ok();
-                                cx.update_window_entity(&dpe, |s, w, cx| {
-                                    s.set_value(dep_v, w, cx)
-                                })
-                                .ok();
-                            }
-                        }
-                        Err(e) => {
-                            weak.update(cx, |view, cx| {
-                                view.state = InstallState::Done {
-                                    message: format!("Failed to read .deb info: {}", e),
-                                    success: false,
-                                    log: String::new(),
-                                };
-                                cx.notify();
-                            })
-                            .ok();
-                        }
-                    }
+                    load_deb_async(path, path_str, weak, cx).await;
                 }
                 _ => {} // cancelled → stay Idle
             }
@@ -532,6 +440,97 @@ fn render_idle(cx: &mut Context<InstallView>) -> gpui::AnyElement {
                 })),
         )
         .into_any_element()
+}
+
+// ---------------------------------------------------------------------------
+// Shared async helper – used by both load_deb_file and select_file
+// ---------------------------------------------------------------------------
+
+async fn load_deb_async(
+    path: PathBuf,
+    path_str: String,
+    weak: WeakEntity<InstallView>,
+    cx: &mut AsyncWindowContext,
+) {
+    let result = cx
+        .background_executor()
+        .spawn(async move {
+            let info = deb_reader::read_deb_info(&path)?;
+            let installed = dpkg::installed_version(&info.name);
+            Ok::<_, anyhow::Error>((info, installed))
+        })
+        .await;
+
+    match result {
+        Ok((info, installed_version)) => {
+            // Collect entity handles before mutating state
+            let entities = weak
+                .read_with(cx, |view, _| {
+                    (
+                        view.info_inputs.name.clone(),
+                        view.info_inputs.version.clone(),
+                        view.info_inputs.path.clone(),
+                        view.info_inputs.description.clone(),
+                        view.info_inputs.maintainer.clone(),
+                        view.info_inputs.size.clone(),
+                        view.info_inputs.section.clone(),
+                        view.info_inputs.depends.clone(),
+                    )
+                })
+                .ok();
+
+            // Transition to FileSelected
+            weak.update(cx, |view, cx| {
+                let p = match &view.state {
+                    InstallState::LoadingInfo(p) => p.clone(),
+                    _ => PathBuf::new(),
+                };
+                view.state = InstallState::FileSelected {
+                    path: p,
+                    info: info.clone(),
+                    installed_version,
+                };
+                cx.notify();
+            })
+            .ok();
+
+            // Populate the selectable input fields
+            if let Some((ne, ve, pe, de, me, se, ste, dpe)) = entities {
+                let name_v = info.name.clone();
+                let ver_v = format!("v{} ({})", info.version, info.architecture);
+                let path_v = path_str;
+                let desc_v = info.description.lines().next().unwrap_or("").to_string();
+                let maint_v = info.maintainer.clone();
+                let size_v = if info.installed_size_kb > 0 {
+                    format!("{} KB", info.installed_size_kb)
+                } else {
+                    "unknown".to_string()
+                };
+                let sect_v = info.section.clone().unwrap_or_default();
+                let dep_v = info.depends.join(", ");
+
+                cx.update_window_entity(&ne, |s, w, cx| s.set_value(name_v, w, cx)).ok();
+                cx.update_window_entity(&ve, |s, w, cx| s.set_value(ver_v, w, cx)).ok();
+                cx.update_window_entity(&pe, |s, w, cx| s.set_value(path_v, w, cx)).ok();
+                cx.update_window_entity(&de, |s, w, cx| s.set_value(desc_v, w, cx)).ok();
+                cx.update_window_entity(&me, |s, w, cx| s.set_value(maint_v, w, cx)).ok();
+                cx.update_window_entity(&se, |s, w, cx| s.set_value(size_v, w, cx)).ok();
+                cx.update_window_entity(&ste, |s, w, cx| s.set_value(sect_v, w, cx)).ok();
+                cx.update_window_entity(&dpe, |s, w, cx| s.set_value(dep_v, w, cx)).ok();
+            }
+        }
+        Err(e) => {
+            weak.update(cx, |view, cx| {
+                view.state = InstallState::Done {
+                    message: format!("Failed to read .deb info: {}", e),
+                    success: false,
+                    log: String::new(),
+                };
+                cx.notify();
+            })
+            .ok();
+        }
+    }
 }
 
 fn render_loading_info(path: String) -> gpui::AnyElement {

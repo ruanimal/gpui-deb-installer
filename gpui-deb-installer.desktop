@@ -3,8 +3,12 @@ Version=1.0
 Type=Application
 Name=DEB Installer
 Comment=Install and manage .deb packages
-Exec=%EXEC%
+Exec=%EXEC% %F
 Icon=gpui-deb-installer
 Terminal=false
 Categories=System;PackageManager;
 StartupWMClass=gpui-deb-installer
+MimeType=application/x-deb;
+NoDisplay=false
+
+# Enable opening .deb files directly with this application

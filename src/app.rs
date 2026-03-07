@@ -1,5 +1,5 @@
 use gpui::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
-use std::sync::Arc;
+use std::{sync::Arc, path::PathBuf};
 use gpui_component::{
     ActiveTheme,
     tab::{Tab, TabBar},
@@ -16,9 +16,9 @@ pub struct AppView {
 }
 
 impl AppView {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let packages_view = cx.new(|cx| PackagesView::new(window, cx));
-        let install_view = cx.new(|cx| InstallView::new(window, cx));
+        let install_view = cx.new(|cx| InstallView::new(window, initial_deb_path, cx));
 
         // When a package is installed/uninstalled, reload the Installed list.
         {

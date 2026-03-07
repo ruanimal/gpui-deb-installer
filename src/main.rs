@@ -6,14 +6,25 @@ mod views;
 use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_component::Root;
 use gpui_component_assets::Assets;
+use std::path::PathBuf;
 
 use app::AppView;
 use utils::dpkg;
 
 fn main() {
+    // Parse command line arguments for deb file path
+    let deb_path = std::env::args().nth(1).and_then(|arg| {
+        let path = PathBuf::from(&arg);
+        if path.extension().and_then(|e| e.to_str()) == Some("deb") {
+            Some(path)
+        } else {
+            None
+        }
+    });
+
     Application::new()
         .with_assets(Assets)
-        .run(|cx: &mut App| {
+        .run(move |cx: &mut App| {
             gpui_component::init(cx);
 
             if !dpkg::check_pkexec() {
@@ -34,7 +45,7 @@ fn main() {
                     ..Default::default()
                 },
                 |window, cx| {
-                    let app_view = cx.new(|cx| AppView::new(window, cx));
+                    let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), cx));
                     let app_view: gpui::AnyView = app_view.into();
                     cx.new(|cx| Root::new(app_view, window, cx))
                 },
