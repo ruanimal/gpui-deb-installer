@@ -1,7 +1,7 @@
 use chrono::Utc;
 use gpui::{
-    App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, StatefulInteractiveElement, Styled, Subscription, VisualContext,
+    App, AppContext, Context, Entity, IntoElement, ParentElement,
+    PathPromptOptions, Render, Styled, Subscription, VisualContext,
     Window, div, prelude::FluentBuilder,
 };
 use gpui_component::{
@@ -9,6 +9,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
     input::{Input, InputEvent, InputState},
+    text::TextView,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -454,7 +455,7 @@ impl InstallView {
 // ---------------------------------------------------------------------------
 
 impl Render for InstallView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
             .p_4()
@@ -472,13 +473,13 @@ impl Render for InstallView {
                     render_file_selected(path_s, info, iv, inputs, cx)
                 }
                 InstallState::Installing { info, log } => {
-                    render_with_log(&format!("Installing '{}'…", info.name), log, None, cx)
+                    render_with_log(&format!("Installing '{}'…", info.name), log, None, window, cx)
                 }
                 InstallState::Uninstalling { pkg_name, log } => {
-                    render_with_log(&format!("Uninstalling '{}'…", pkg_name), log, None, cx)
+                    render_with_log(&format!("Uninstalling '{}'…", pkg_name), log, None, window, cx)
                 }
                 InstallState::Done { message, success, log } => {
-                    render_with_log("", log, Some((*success, message.clone())), cx)
+                    render_with_log("", log, Some((*success, message.clone())), window, cx)
                 }
             })
     }
@@ -657,6 +658,7 @@ fn render_with_log(
     title: &str,
     log: &str,
     done: Option<(bool, String)>,
+    window: &mut Window,
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
     let log_text = if log.is_empty() {
@@ -665,6 +667,9 @@ fn render_with_log(
         log.to_string()
     };
     let is_done = done.is_some();
+    // Wrap in a fenced code block so the Markdown renderer preserves
+    // whitespace and uses monospace font without interpreting special chars.
+    let md_content = format!("```\n{}\n```\n", log_text);
 
     v_flex()
         .flex_1()
@@ -709,15 +714,11 @@ fn render_with_log(
                         .child("Output"),
                 )
                 .child(
-                    div()
-                        .id("install-log-scroll")
-                        .flex_1()
-                        .p_3()
-                        .overflow_y_scroll()
-                        .font_family("monospace")
-                        .text_sm()
-                        .text_color(cx.theme().foreground)
-                        .child(log_text),
+                    div().flex_1().overflow_hidden().child(
+                        TextView::markdown("install-log", md_content, window, cx)
+                            .scrollable(true)
+                            .selectable(true),
+                    ),
                 ),
         )
         // Back button appears only after completion
