@@ -31,6 +31,20 @@ pub fn install_deb(path: &Path) -> Result<String> {
     }
 }
 
+/// Returns the currently installed version of a package, or None if not installed.
+pub fn installed_version(name: &str) -> Option<String> {
+    let output = Command::new("dpkg-query")
+        .args(["-W", "-f=${Version}", name])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let v = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if v.is_empty() { None } else { Some(v) }
+    } else {
+        None
+    }
+}
+
 /// Removes a package using `pkexec apt remove --yes`.
 /// Returns the combined stdout+stderr output on success.
 pub fn remove_package(name: &str) -> Result<String> {

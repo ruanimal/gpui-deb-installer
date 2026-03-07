@@ -25,7 +25,12 @@ use crate::{
 pub enum InstallState {
     Idle,
     LoadingInfo(PathBuf),
-    FileSelected { path: PathBuf, info: DebInfo },
+    FileSelected {
+        path: PathBuf,
+        info: DebInfo,
+        /// Version already installed on the system, if any.
+        installed_version: Option<String>,
+    },
     Installing { info: DebInfo },
     Done { message: String, success: bool },
 }
@@ -90,19 +95,24 @@ impl InstallView {
                     })
                     .ok();
 
+                    // Read deb info AND check system installation status in one background task.
                     let result = cx
                         .background_executor()
-                        .spawn(async move { deb_reader::read_deb_info(&path) })
+                        .spawn(async move {
+                            let info = deb_reader::read_deb_info(&path)?;
+                            let installed = dpkg::installed_version(&info.name);
+                            Ok::<_, anyhow::Error>((info, installed))
+                        })
                         .await;
 
                     weak.update(cx, |view, cx| {
                         view.state = match result {
-                            Ok(info) => {
+                            Ok((info, installed_version)) => {
                                 let p = match &view.state {
                                     InstallState::LoadingInfo(p) => p.clone(),
                                     _ => PathBuf::new(),
                                 };
-                                InstallState::FileSelected { path: p, info }
+                                InstallState::FileSelected { path: p, info, installed_version }
                             }
                             Err(e) => InstallState::Done {
                                 message: format!("Failed to read .deb info: {}", e),
@@ -121,7 +131,7 @@ impl InstallView {
 
     fn install_package(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (path, info) = match &self.state {
-            InstallState::FileSelected { path, info } => (path.clone(), info.clone()),
+            InstallState::FileSelected { path, info, .. } => (path.clone(), info.clone()),
             _ => return,
         };
 
@@ -201,8 +211,13 @@ impl Render for InstallView {
                 InstallState::LoadingInfo(path) => {
                     render_loading_info(path.to_string_lossy().to_string())
                 }
-                InstallState::FileSelected { path, info } => {
-                    render_file_selected(path.to_string_lossy().to_string(), info, cx)
+                InstallState::FileSelected { path, info, installed_version } => {
+                    render_file_selected(
+                        path.to_string_lossy().to_string(),
+                        info,
+                        installed_version.clone(),
+                        cx,
+                    )
                 }
                 InstallState::Installing { info } => render_installing(&info.name),
                 InstallState::Done { message, success } => {
@@ -261,6 +276,7 @@ fn render_loading_info(path: String) -> gpui::AnyElement {
 fn render_file_selected(
     path: String,
     info: &DebInfo,
+    installed_version: Option<String>,
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
     let size_str = if info.installed_size_kb > 0 {
@@ -274,6 +290,25 @@ fn render_file_selected(
         info.depends.join(", ")
     };
 
+    // Determine install status label and button label
+    let (status_text, status_color, install_label) = match &installed_version {
+        None => (
+            "Not installed".to_string(),
+            None, // use muted_foreground
+            "Install",
+        ),
+        Some(v) if v == &info.version => (
+            format!("Already installed (v{})", v),
+            Some("warning"), // same version → warn
+            "Reinstall",
+        ),
+        Some(v) => (
+            format!("Installed: v{}  →  v{}", v, info.version),
+            Some("info"),
+            "Upgrade / Overwrite",
+        ),
+    };
+
     v_flex()
         .flex_1()
         .gap_3()
@@ -285,9 +320,11 @@ fn render_file_selected(
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().list)
+                // Package name + version row
                 .child(
                     h_flex()
                         .gap_3()
+                        .items_center()
                         .child(
                             div()
                                 .text_xl()
@@ -298,6 +335,32 @@ fn render_file_selected(
                             div()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(format!("v{} ({})", info.version, info.architecture)),
+                        )
+                        // Installation status badge
+                        .child(
+                            div()
+                                .px_2()
+                                .py_1()
+                                .rounded_md()
+                                .text_sm()
+                                .map(|el| match status_color {
+                                    Some("warning") => el
+                                        .bg(cx.theme().warning.opacity(0.15))
+                                        .border_1()
+                                        .border_color(cx.theme().warning)
+                                        .text_color(cx.theme().warning),
+                                    Some("info") => el
+                                        .bg(cx.theme().info.opacity(0.15))
+                                        .border_1()
+                                        .border_color(cx.theme().info)
+                                        .text_color(cx.theme().info),
+                                    _ => el
+                                        .bg(cx.theme().muted.opacity(0.3))
+                                        .border_1()
+                                        .border_color(cx.theme().border)
+                                        .text_color(cx.theme().muted_foreground),
+                                })
+                                .child(status_text),
                         ),
                 )
                 .child(
@@ -325,7 +388,7 @@ fn render_file_selected(
                 .child(
                     Button::new("install-btn")
                         .primary()
-                        .label("Install")
+                        .label(install_label)
                         .on_click(cx.listener(|view, _ev, window, cx| {
                             view.install_package(window, cx);
                         })),
