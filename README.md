@@ -2,7 +2,7 @@
 
 一个使用 [GPUI](https://www.gpui.rs/) 框架编写的高性能、轻量级图形化 `.deb` 软件包安装器。
 
-![Screenshot](icon.svg)
+![Screenshot](screenshot.png)
 
 ## 特性 ✨
 
