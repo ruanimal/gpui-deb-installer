@@ -83,15 +83,6 @@ jobs:
           . "$HOME/.cargo/env"
           cargo deb --no-build
 
-      - name: Rename DEB with arch suffix
-        run: |
-          cd target/debian
-          for f in *.deb; do
-            # cargo-deb 已经会在文件名中包含架构，这里做个确认重命名
-            mv "$f" "${f%.deb}_${{ matrix.deb_arch }}.deb" 2>/dev/null || true
-          done
-          ls -lh *.deb
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
