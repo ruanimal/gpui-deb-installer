@@ -39,7 +39,7 @@ jobs:
             build-essential pkg-config curl git ca-certificates \
             libvulkan-dev libssl-dev \
             libwayland-dev libwayland-egl-backend-dev \
-            libxkbcommon-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-dev libxcb1-dev libxcb-xkb-dev \
             libfontconfig1-dev libfreetype6-dev \
             libdbus-1-dev \
