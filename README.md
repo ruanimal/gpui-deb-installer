@@ -61,15 +61,8 @@ cargo deb
 
 生成的安装包将位于 `target/debian/gpui-deb-installer_*.deb`。
 
-## 项目结构 📂
-
-- `src/main.rs`: 应用入口与参数解析
-- `src/app.rs`: 主窗口视图与标签页切换逻辑
-- `src/views/`:
-  - `install.rs`: 安装逻辑、deb 文件信息展示与实时日志
-  - `packages.rs`: 已安装软件包列表与卸载逻辑
-- `src/models/`: 数据模型与本地 SQLite/JSON 缓存（如果适用）
-- `src/utils/`: 封装 `dpkg` 命令行调用与 deb 文件解析
+## Todo
+- [ ] 包内文件预览, 使用dpkg --fsys-tarfile
 
 ## 开源协议 📄
 
