@@ -7,6 +7,7 @@ use gpui_component::{
     h_flex, v_flex,
     input::{Input, InputState},
     list::ListItem,
+    resizable::{h_resizable, resizable_panel, ResizableState},
     tree::{TreeItem, TreeState, tree},
     IconName,
 };
@@ -30,6 +31,8 @@ pub struct FilesPreviewView {
     /// Last deb path we triggered a load for (used to avoid duplicate loads)
     last_loaded_path: Option<PathBuf>,
     tree_state: Entity<TreeState>,
+    /// Resizable panel state for the left/right split
+    resizable_state: Entity<ResizableState>,
     /// Code editor for text file preview (recreated per selected file)
     editor_state: Entity<InputState>,
     /// The currently selected file (None = nothing selected)
@@ -43,6 +46,7 @@ pub struct FilesPreviewView {
 impl FilesPreviewView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
+        let resizable_state = cx.new(|_cx| ResizableState::default());
         // Create a default code-editor InputState; we recreate it on each file selection
         let editor_state = cx.new(|cx| {
             InputState::new(window, cx)
@@ -54,6 +58,7 @@ impl FilesPreviewView {
             load_state: FilesLoadState::Idle,
             last_loaded_path: None,
             tree_state,
+            resizable_state,
             editor_state,
             selected: None,
         }
@@ -128,93 +133,102 @@ impl Render for FilesPreviewView {
         let tree_state = &self.tree_state;
         let view: Entity<FilesPreviewView> = cx.entity();
 
-        h_flex()
+        div()
             .size_full()
-            .overflow_hidden()
-            // ── Left panel: file tree ──────────────────────────────────────
+            .child(h_resizable("files-preview-split")
+            .with_state(&self.resizable_state)
+            // ── Left panel: file tree ─────────────────────────────────────
             .child(
-                v_flex()
-                    .w(px(240.))
-                    .h_full()
-                    .border_r_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().sidebar)
-                    .overflow_hidden()
-                    // Header
+                resizable_panel()
+                    .size(px(240.))
+                    .size_range(px(120.)..px(480.))
                     .child(
-                        div()
-                            .px_3()
-                            .py_2()
-                            .border_b_1()
+                        v_flex()
+                            .size_full()
+                            .border_r_1()
                             .border_color(cx.theme().border)
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(match &self.load_state {
-                                FilesLoadState::Idle => "请先选择 .deb 文件".to_string(),
-                                FilesLoadState::Loading => "加载中…".to_string(),
-                                FilesLoadState::Loaded(e) => {
-                                    format!("{} 个文件", e.len())
-                                }
-                                FilesLoadState::Error(e) => format!("错误: {}", e),
-                            }),
-                    )
-                    // Tree
-                    .child(
-                        div()
-                            .flex_1()
+                            .bg(cx.theme().sidebar)
                             .overflow_hidden()
-                            .child(tree(tree_state, {
-                                move |ix, entry, selected, _window, _cx| {
-                                    let item = entry.item();
-                                    let depth = entry.depth();
-                                    let is_folder = entry.is_folder();
-                                    let is_expanded = entry.is_expanded();
-                                    let item_id = item.id.clone();
-
-                                    let icon = if is_folder {
-                                        if is_expanded {
-                                            IconName::FolderOpen
-                                        } else {
-                                            IconName::Folder
+                            // Header
+                            .child(
+                                div()
+                                    .px_3()
+                                    .py_2()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(match &self.load_state {
+                                        FilesLoadState::Idle => "请先选择 .deb 文件".to_string(),
+                                        FilesLoadState::Loading => "加载中…".to_string(),
+                                        FilesLoadState::Loaded(e) => {
+                                            format!("{} 个文件", e.len())
                                         }
-                                    } else {
-                                        IconName::File
-                                    };
+                                        FilesLoadState::Error(e) => format!("错误: {}", e),
+                                    }),
+                            )
+                            // Tree
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .overflow_hidden()
+                                    .child(tree(tree_state, {
+                                        move |ix, entry, selected, _window, _cx| {
+                                            let item = entry.item();
+                                            let depth = entry.depth();
+                                            let is_folder = entry.is_folder();
+                                            let is_expanded = entry.is_expanded();
+                                            let item_id = item.id.clone();
 
-                                    let indent = px(12.) + px(16.) * depth as f32;
-
-                                    ListItem::new(ix)
-                                        .selected(selected)
-                                        .pl(indent)
-                                        .child(
-                                            h_flex()
-                                                .gap_1()
-                                                .items_center()
-                                                .child(icon)
-                                                .child(item.label.clone()),
-                                        )
-                                        .on_click({
-                                            let view = view.clone();
-                                            let id = item_id.to_string();
-                                            move |_, window, cx| {
-                                                if !is_folder {
-                                                    view.update(cx, |this, cx| {
-                                                        this.select_file(&id, window, cx);
-                                                    });
+                                            let icon = if is_folder {
+                                                if is_expanded {
+                                                    IconName::FolderOpen
+                                                } else {
+                                                    IconName::Folder
                                                 }
-                                            }
-                                        })
-                                }
-                            })),
+                                            } else {
+                                                IconName::File
+                                            };
+
+                                            let indent = px(12.) + px(16.) * depth as f32;
+
+                                            ListItem::new(ix)
+                                                .selected(selected)
+                                                .pl(indent)
+                                                .child(
+                                                    h_flex()
+                                                        .gap_1()
+                                                        .items_center()
+                                                        .child(icon)
+                                                        .child(item.label.clone()),
+                                                )
+                                                .on_click({
+                                                    let view = view.clone();
+                                                    let id = item_id.to_string();
+                                                    move |_, window, cx| {
+                                                        if !is_folder {
+                                                            view.update(cx, |this, cx| {
+                                                                this.select_file(&id, window, cx);
+                                                            });
+                                                        }
+                                                    }
+                                                })
+                                        }
+                                    })),
+                            ),
                     ),
             )
-            // ── Right panel: preview ───────────────────────────────────────
+            // ── Right panel: preview ──────────────────────────────────────
             .child(
-                v_flex()
-                    .flex_1()
-                    .h_full()
-                    .overflow_hidden()
-                    .child(self.render_preview(cx)),
+                resizable_panel()
+                    .size_range(px(200.)..px(f32::MAX))
+                    .child(
+                        v_flex()
+                            .size_full()
+                            .overflow_hidden()
+                            .child(self.render_preview(cx)),
+                    ),
+            )
             )
     }
 }
