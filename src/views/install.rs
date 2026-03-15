@@ -568,16 +568,23 @@ fn render_file_selected(
     // Determine install status label and button label
     let (status_text, status_color, install_label) = match &installed_version {
         None => ("Not installed".to_string(), None, "Install"),
-        Some(v) if v == &info.version => (
-            format!("Already installed (v{})", v),
-            Some("warning"),
-            "Reinstall",
-        ),
-        Some(v) => (
-            format!("Installed: v{}  →  v{}", v, info.version),
-            Some("info"),
-            "Upgrade / Overwrite",
-        ),
+        Some(v) => match crate::utils::dpkg::compare_versions(v, &info.version) {
+            std::cmp::Ordering::Equal => (
+                format!("Already installed (v{})", v),
+                Some("warning"),
+                "Reinstall",
+            ),
+            std::cmp::Ordering::Less => (
+                format!("Upgrade: v{}  →  v{}", v, info.version),
+                Some("success"),
+                "Upgrade",
+            ),
+            std::cmp::Ordering::Greater => (
+                format!("Downgrade: v{}  →  v{}", v, info.version),
+                Some("danger"),
+                "Downgrade",
+            ),
+        },
     };
 
     v_flex()
@@ -625,6 +632,16 @@ fn render_file_selected(
                                         .border_1()
                                         .border_color(cx.theme().info)
                                         .text_color(cx.theme().info),
+                                    Some("success") => el
+                                        .bg(cx.theme().success.opacity(0.15))
+                                        .border_1()
+                                        .border_color(cx.theme().success)
+                                        .text_color(cx.theme().success),
+                                    Some("danger") => el
+                                        .bg(cx.theme().danger.opacity(0.15))
+                                        .border_1()
+                                        .border_color(cx.theme().danger)
+                                        .text_color(cx.theme().danger),
                                     _ => el
                                         .bg(cx.theme().muted.opacity(0.3))
                                         .border_1()

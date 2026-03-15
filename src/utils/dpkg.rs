@@ -100,4 +100,30 @@ pub fn installed_version(name: &str) -> Option<String> {
     }
 }
 
+/// Compares two Debian version strings using `dpkg --compare-versions`.
+pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+    // Check if they are equal first.
+    if Command::new("dpkg")
+        .args(["--compare-versions", v1, "eq", v2])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return std::cmp::Ordering::Equal;
+    }
+
+    // Check if v1 is strictly less than v2.
+    if Command::new("dpkg")
+        .args(["--compare-versions", v1, "lt", v2])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return std::cmp::Ordering::Less;
+    }
+
+    // Otherwise, assume v1 is strictly greater than v2.
+    std::cmp::Ordering::Greater
+}
+
 
