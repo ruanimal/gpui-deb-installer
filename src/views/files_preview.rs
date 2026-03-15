@@ -1,6 +1,6 @@
 use gpui::{
     AppContext, AsyncWindowContext, Context, Entity, IntoElement, ParentElement, Render,
-    Styled, Subscription, WeakEntity, Window, div, img, px,
+    Styled, Subscription, VisualContext, WeakEntity, Window, div, img, px, SharedString,
 };
 use gpui_component::{
     ActiveTheme,
@@ -23,7 +23,7 @@ pub enum FilesLoadState {
     Idle,
     Loading,
     Loaded(Vec<DebFileEntry>),
-    Error(String),
+    Error,
 }
 
 pub struct FilesPreviewView {
@@ -59,7 +59,7 @@ impl FilesPreviewView {
         
         // Search Input State
         let search_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("搜索文件…")
+            InputState::new(window, cx).placeholder("请先选择 .deb 文件")
         });
 
         let mut view = Self {
@@ -102,6 +102,7 @@ impl FilesPreviewView {
         // Reset search
         self.search_state.update(cx, |s, cx| {
             s.set_value(String::new(), window, cx);
+            s.set_placeholder("加载中…", window, cx);
         });
 
         // Clear tree
@@ -197,25 +198,6 @@ impl Render for FilesPreviewView {
                             .border_r_1()
                             .border_color(cx.theme().border)
                             .bg(cx.theme().sidebar)
-                            .overflow_hidden()
-                            // Header
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_2()
-                                    .border_b_1()
-                                    .border_color(cx.theme().border)
-                                    .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(match &self.load_state {
-                                        FilesLoadState::Idle => "请先选择 .deb 文件".to_string(),
-                                        FilesLoadState::Loading => "加载中…".to_string(),
-                                        FilesLoadState::Loaded(e) => {
-                                            format!("{} 个文件", e.len())
-                                        }
-                                        FilesLoadState::Error(e) => format!("错误: {}", e),
-                                    }),
-                            )
                             // Search Box
                             .child(
                                 div()
@@ -365,19 +347,37 @@ async fn load_files_async(
 
     match result {
         Ok(entries) => {
+            let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
+            let count = entries.len();
+            
             weak.update(cx, |view, cx| {
                 view.load_state = FilesLoadState::Loaded(entries);
                 view.selected = None;
                 view.update_tree_filter(cx);
             })
             .ok();
+
+            if let Some(state) = search_state {
+                cx.update_window_entity(&state, |s: &mut InputState, w, c| {
+                    s.set_placeholder(SharedString::from(format!("搜索 {} 个文件…", count)), w, c)
+                }).ok();
+            }
         }
         Err(e) => {
+            let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
+            let err_msg = e.to_string();
+
             weak.update(cx, |view, cx| {
-                view.load_state = FilesLoadState::Error(e.to_string());
+                view.load_state = FilesLoadState::Error;
                 cx.notify();
             })
             .ok();
+
+            if let Some(state) = search_state {
+                cx.update_window_entity(&state, |s: &mut InputState, w, c| {
+                    s.set_placeholder(SharedString::from(format!("错误: {}", err_msg)), w, c)
+                }).ok();
+            }
         }
     }
 }
