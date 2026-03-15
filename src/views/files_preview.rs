@@ -1,11 +1,11 @@
 use gpui::{
     AppContext, AsyncWindowContext, Context, Entity, IntoElement, ParentElement, Render,
-    Styled, WeakEntity, Window, div, img, px,
+    Styled, Subscription, WeakEntity, Window, div, img, px,
 };
 use gpui_component::{
     ActiveTheme,
     h_flex, v_flex,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     list::ListItem,
     resizable::{h_resizable, resizable_panel, ResizableState},
     tree::{TreeItem, TreeState, tree},
@@ -37,6 +37,9 @@ pub struct FilesPreviewView {
     editor_state: Entity<InputState>,
     /// The currently selected file (None = nothing selected)
     selected: Option<DebFileEntry>,
+    /// Search input state for filtering tree
+    search_state: Entity<InputState>,
+    _subscriptions: Vec<Subscription>,
 }
 
 // ---------------------------------------------------------------------------
@@ -53,15 +56,33 @@ impl FilesPreviewView {
                 .code_editor("text")
                 .line_number(true)
         });
+        
+        // Search Input State
+        let search_state = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("搜索文件…")
+        });
 
-        Self {
+        let mut view = Self {
             load_state: FilesLoadState::Idle,
             last_loaded_path: None,
             tree_state,
             resizable_state,
             editor_state,
             selected: None,
-        }
+            search_state: search_state.clone(),
+            _subscriptions: Vec::new(),
+        };
+
+        view._subscriptions.push(cx.subscribe(
+            &search_state,
+            |view: &mut Self, _emitter, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    view.update_tree_filter(cx);
+                }
+            },
+        ));
+
+        view
     }
 
     // -----------------------------------------------------------------------
@@ -78,8 +99,12 @@ impl FilesPreviewView {
         self.load_state = FilesLoadState::Loading;
         self.selected = None;
 
+        // Reset search
+        self.search_state.update(cx, |s, cx| {
+            s.set_value(String::new(), window, cx);
+        });
+
         // Clear tree
-        let tree_state = self.tree_state.clone();
         self.tree_state.update(cx, |state, cx| state.set_items(vec![], cx));
 
         // Reset editor
@@ -90,7 +115,7 @@ impl FilesPreviewView {
         cx.notify();
 
         cx.spawn_in(window, async move |weak, cx| {
-            load_files_async(path, weak, tree_state, cx).await;
+            load_files_async(path, weak, cx).await;
         })
         .detach();
     }
@@ -120,6 +145,30 @@ impl FilesPreviewView {
         }
 
         self.selected = Some(file);
+        cx.notify();
+    }
+
+    fn update_tree_filter(&mut self, cx: &mut Context<Self>) {
+        let search_text = self.search_state.read(cx).text().to_string().to_lowercase();
+        let entries = match &self.load_state {
+            FilesLoadState::Loaded(e) => e,
+            _ => return,
+        };
+
+        let items = if search_text.is_empty() {
+            build_tree_items_clean(entries)
+        } else {
+            let filtered: Vec<DebFileEntry> = entries
+                .iter()
+                .filter(|e| e.path.to_lowercase().contains(&search_text))
+                .cloned()
+                .collect();
+            build_tree_items_clean(&filtered)
+        };
+
+        self.tree_state.update(cx, |state, cx| {
+            state.set_items(items, cx);
+        });
         cx.notify();
     }
 }
@@ -166,6 +215,22 @@ impl Render for FilesPreviewView {
                                         }
                                         FilesLoadState::Error(e) => format!("错误: {}", e),
                                     }),
+                            )
+                            // Search Box
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .px_2()
+                                    .py_2()
+                                    .border_b_1()
+                                    .border_color(cx.theme().border)
+                                    .child(
+                                        Input::new(&self.search_state)
+                                            .w_full()
+                                            .cleanable(true)
+                                    )
                             )
                             // Tree
                             .child(
@@ -291,7 +356,6 @@ impl FilesPreviewView {
 async fn load_files_async(
     path: PathBuf,
     weak: WeakEntity<FilesPreviewView>,
-    tree_state: Entity<TreeState>,
     cx: &mut AsyncWindowContext,
 ) {
     let result = cx
@@ -301,17 +365,10 @@ async fn load_files_async(
 
     match result {
         Ok(entries) => {
-            let items = build_tree_items_clean(&entries);
-
-            cx.update_entity(&tree_state, |state: &mut TreeState, cx| {
-                state.set_items(items, cx);
-            })
-            .ok();
-
             weak.update(cx, |view, cx| {
                 view.load_state = FilesLoadState::Loaded(entries);
                 view.selected = None;
-                cx.notify();
+                view.update_tree_filter(cx);
             })
             .ok();
         }
