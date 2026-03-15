@@ -768,6 +768,7 @@ fn render_with_log(
         .when(is_done, |el| {
             el.child(
                 Button::new("reset-btn")
+                    .primary()
                     .label("Back")
                     .on_click(cx.listener(|view, _ev, _window, cx| {
                         view.reset(cx);
