@@ -435,7 +435,7 @@ fn render_image_preview(bytes: &[u8], cx: &mut Context<FilesPreviewView>) -> gpu
             .justify_center()
             .p_4()
             .child(
-                img(tmp.to_string_lossy().to_string())
+                img(tmp)
                     .max_w_full()
                     .max_h_full(),
             )
