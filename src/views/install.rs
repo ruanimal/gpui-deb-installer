@@ -370,14 +370,6 @@ impl InstallView {
             _ => "_Select a .deb file in the **Install** tab to view its dependencies._".to_string(),
         }
     }
-
-    /// Returns the path of the currently loaded .deb file, if any.
-    pub fn deb_path(&self) -> Option<PathBuf> {
-        match &self.state {
-            InstallState::FileSelected { path, .. } => Some(path.clone()),
-            _ => None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
