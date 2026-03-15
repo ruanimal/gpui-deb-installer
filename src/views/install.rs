@@ -61,6 +61,8 @@ pub struct InstallView {
     _subscriptions: Vec<Subscription>,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
+    /// Called when a .deb file has been successfully loaded (path provided).
+    pub on_deb_loaded: Option<Arc<dyn Fn(PathBuf, &mut Window, &mut App) + 'static>>,
 }
 
 impl InstallView {
@@ -111,6 +113,7 @@ impl InstallView {
             info_inputs: inputs,
             _subscriptions: subscriptions,
             on_installed: None,
+            on_deb_loaded: None,
         };
 
         // If an initial deb path was provided, schedule loading it
@@ -367,6 +370,14 @@ impl InstallView {
             _ => "_Select a .deb file in the **Install** tab to view its dependencies._".to_string(),
         }
     }
+
+    /// Returns the path of the currently loaded .deb file, if any.
+    pub fn deb_path(&self) -> Option<PathBuf> {
+        match &self.state {
+            InstallState::FileSelected { path, .. } => Some(path.clone()),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +487,18 @@ async fn load_deb_async(
                 .ok();
 
             // Transition to FileSelected
+            let loaded_path = weak
+                .read_with(cx, |view, _| match &view.state {
+                    InstallState::LoadingInfo(p) => p.clone(),
+                    _ => PathBuf::new(),
+                })
+                .unwrap_or_default();
+
+            let on_deb_loaded = weak
+                .read_with(cx, |view, _| view.on_deb_loaded.clone())
+                .ok()
+                .flatten();
+
             weak.update(cx, |view, cx| {
                 let p = match &view.state {
                     InstallState::LoadingInfo(p) => p.clone(),
@@ -489,6 +512,11 @@ async fn load_deb_async(
                 cx.notify();
             })
             .ok();
+
+            // Fire on_deb_loaded callback
+            if let Some(cb) = on_deb_loaded {
+                cx.update(|window, cx| cb(loaded_path, window, cx)).ok();
+            }
 
             // Populate the selectable input fields
             if let Some((ne, ve, pe, de, me, se, ste)) = entities {

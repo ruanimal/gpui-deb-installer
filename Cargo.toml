@@ -1,6 +1,6 @@
 [package]
 name = "gpui-deb-installer"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "A graphical .deb package installer"
 
@@ -32,3 +32,4 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 dirs = "5"
 async-channel = "2"
+tar = "0.4"

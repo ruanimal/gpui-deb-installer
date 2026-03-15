@@ -7,18 +7,24 @@ use gpui_component::{
     v_flex,
 };
 
-use crate::views::{install::InstallView, packages::PackagesView};
+use crate::views::{
+    install::InstallView,
+    packages::PackagesView,
+    files_preview::FilesPreviewView,
+};
 
 pub struct AppView {
     active_tab: usize,
     install_view: Entity<InstallView>,
     packages_view: Entity<PackagesView>,
+    files_preview_view: Entity<FilesPreviewView>,
 }
 
 impl AppView {
     pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let packages_view = cx.new(|cx| PackagesView::new(window, cx));
         let install_view = cx.new(|cx| InstallView::new(window, initial_deb_path, cx));
+        let files_preview_view = cx.new(|cx| FilesPreviewView::new(window, cx));
 
         // When a package is installed/uninstalled, reload the Installed list.
         {
@@ -51,10 +57,23 @@ impl AppView {
             });
         }
 
+        // When the install_view loads a deb file, trigger the files preview.
+        {
+            let files_weak = files_preview_view.downgrade();
+            install_view.update(cx, |view, _cx| {
+                view.on_deb_loaded = Some(Arc::new(move |path: PathBuf, window: &mut Window, cx: &mut App| {
+                    files_weak.update(cx, |fv, cx| {
+                        fv.trigger_load(path, window, cx);
+                    }).ok();
+                }));
+            });
+        }
+
         Self {
             active_tab: 0,
             install_view,
             packages_view,
+            files_preview_view,
         }
     }
 }
@@ -75,6 +94,7 @@ impl Render for AppView {
                     }))
                     .child(Tab::new().label("Install"))
                     .child(Tab::new().label("Dependencies"))
+                    .child(Tab::new().label("Files"))
                     .child(Tab::new().label("Installed")),
             )
             .child(
@@ -94,6 +114,9 @@ impl Render for AppView {
                         )
                     })
                     .when(self.active_tab == 2, |el| {
+                        el.child(self.files_preview_view.clone())
+                    })
+                    .when(self.active_tab == 3, |el| {
                         el.child(self.packages_view.clone())
                     }),
             )
