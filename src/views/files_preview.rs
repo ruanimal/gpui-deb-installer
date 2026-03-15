@@ -1,5 +1,5 @@
 use gpui::{
-    AppContext, AsyncWindowContext, Context, Entity, IntoElement, ParentElement, Render,
+    AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render,
     Styled, Subscription, VisualContext, WeakEntity, Window, div, img, px, SharedString,
 };
 use gpui_component::{
@@ -7,6 +7,7 @@ use gpui_component::{
     h_flex, v_flex,
     input::{Input, InputEvent, InputState},
     list::ListItem,
+    menu::{ContextMenuExt, PopupMenuItem},
     resizable::{h_resizable, resizable_panel, ResizableState},
     tree::{TreeItem, TreeState, tree},
     IconName,
@@ -226,6 +227,7 @@ impl Render for FilesPreviewView {
                                             let is_folder = entry.is_folder();
                                             let is_expanded = entry.is_expanded();
                                             let item_id = item.id.clone();
+                                            let full_path = item_id.to_string();
 
                                             let icon = if is_folder {
                                                 if is_expanded {
@@ -247,7 +249,21 @@ impl Render for FilesPreviewView {
                                                         .gap_1()
                                                         .items_center()
                                                         .child(icon)
-                                                        .child(item.label.clone()),
+                                                        .child(item.label.clone())
+                                                        .context_menu({
+                                                            let path = full_path.clone();
+                                                            move |menu, _window, _cx| {
+                                                                let path = path.clone();
+                                                                menu.item(
+                                                                    PopupMenuItem::new("复制路径")
+                                                                        .on_click(move |_: &gpui::ClickEvent, _window, cx| {
+                                                                            cx.write_to_clipboard(
+                                                                                ClipboardItem::new_string(path.clone()),
+                                                                            );
+                                                                        })
+                                                                )
+                                                            }
+                                                        }),
                                                 )
                                                 .on_click({
                                                     let view = view.clone();
