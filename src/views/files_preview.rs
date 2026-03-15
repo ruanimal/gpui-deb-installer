@@ -248,7 +248,13 @@ impl FilesPreviewView {
                 DebFileKind::Text(_) => div()
                     .flex_1()
                     .size_full()
-                    .child(Input::new(&self.editor_state).h_full().disabled(true))
+                    .child(
+                        Input::new(&self.editor_state)
+                            .h_full()
+                            .disabled(true)
+                            .appearance(false)
+                            .bg(cx.theme().background)
+                    )
                     .into_any_element(),
 
                 DebFileKind::Image(bytes) => render_image_preview(bytes, cx),
