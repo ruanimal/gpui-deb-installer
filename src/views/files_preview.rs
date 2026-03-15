@@ -405,8 +405,21 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
             .iter()
             .map(|(name, is_dir, full_path)| {
                 if *is_dir {
-                    let sub = build(full_path, child_map);
-                    TreeItem::new(full_path.clone(), name.clone())
+                    let mut current_name = name.clone();
+                    let mut current_path = full_path.clone();
+
+                    // Compact folder logic: if a directory has exactly one child AND that child is also a directory, merge them
+                    while let Some(sub_children) = child_map.get(&current_path) {
+                        if sub_children.len() == 1 && sub_children[0].1 {
+                            current_name = format!("{}/{}", current_name, sub_children[0].0);
+                            current_path = sub_children[0].2.clone();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let sub = build(&current_path, child_map);
+                    TreeItem::new(current_path.clone(), current_name)
                         .children(sub)
                         .expanded(true)
                 } else {
