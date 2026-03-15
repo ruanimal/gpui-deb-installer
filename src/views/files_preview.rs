@@ -408,7 +408,7 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
                     let sub = build(full_path, child_map);
                     TreeItem::new(full_path.clone(), name.clone())
                         .children(sub)
-                        .expanded(false)
+                        .expanded(true)
                 } else {
                     TreeItem::new(full_path.clone(), name.clone())
                 }
