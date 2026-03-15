@@ -3,6 +3,7 @@
 一个使用 [GPUI](https://www.gpui.rs/) 框架编写的高性能、轻量级图形化 `.deb` 软件包安装器。
 
 ![Screenshot](screenshot.png)
+![Screenshot2](screenshot2.png)
 
 ## 特性 ✨
 
@@ -62,7 +63,7 @@ cargo deb
 生成的安装包将位于 `target/debian/gpui-deb-installer_*.deb`。
 
 ## Todo
-- [ ] 包内文件预览, 使用dpkg --fsys-tarfile
+- [x] 包内文件预览, 使用dpkg --fsys-tarfile
 
 ## 开源协议 📄
 
