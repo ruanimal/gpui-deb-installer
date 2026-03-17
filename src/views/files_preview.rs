@@ -57,7 +57,7 @@ impl FilesPreviewView {
                 .code_editor("text")
                 .line_number(true)
         });
-        
+
         // Search Input State
         let search_state = cx.new(|cx| {
             InputState::new(window, cx).placeholder("请先选择 .deb 文件")
@@ -320,7 +320,7 @@ impl FilesPreviewView {
                     )
                     .into_any_element(),
 
-                DebFileKind::Image(bytes) => render_image_preview(bytes, cx),
+                DebFileKind::Image(bytes) => render_image_preview(&file.path, bytes, cx),
 
                 DebFileKind::Unsupported => {
                     let path = file.path.clone();
@@ -365,7 +365,7 @@ async fn load_files_async(
         Ok(entries) => {
             let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
             let count = entries.len();
-            
+
             weak.update(cx, |view, cx| {
                 view.load_state = FilesLoadState::Loaded(entries);
                 view.selected = None;
@@ -515,10 +515,24 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn render_image_preview(bytes: &[u8], cx: &mut Context<FilesPreviewView>) -> gpui::AnyElement {
+fn render_image_preview(path: &str, bytes: &[u8], cx: &mut Context<FilesPreviewView>) -> gpui::AnyElement {
     use std::io::Write;
 
-    let tmp = std::env::temp_dir().join("gpui_deb_preview_img.tmp");
+    // Use a unique filename in the temp directory based on the file path to avoid conflicts
+    let hash = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        hasher.finish()
+    };
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("tmp");
+
+    let tmp = std::env::temp_dir().join(format!("gpui_deb_preview_{:x}.{}", hash, extension));
+
     match std::fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes)) {
         Ok(_) => div()
             .size_full()

@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "gpui-deb-installer"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
