@@ -3,7 +3,9 @@ mod models;
 mod utils;
 mod views;
 
-use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
+use gpui::{
+    App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+};
 use gpui_component::Root;
 use gpui_component_assets::Assets;
 use std::path::PathBuf;
@@ -39,6 +41,10 @@ fn main() {
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Deb Installer".into()),
+                        ..Default::default()
+                    }),
                     focus: true,
                     show: true,
                     app_id: Some("gpui-deb-installer".to_string()),

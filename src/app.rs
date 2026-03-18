@@ -62,6 +62,7 @@ impl AppView {
             let files_weak = files_preview_view.downgrade();
             install_view.update(cx, |view, _cx| {
                 view.on_deb_loaded = Some(Arc::new(move |path: PathBuf, window: &mut Window, cx: &mut App| {
+                    window.set_window_title(&format!("Deb Installer - {}", path.display()));
                     files_weak.update(cx, |fv, cx| {
                         fv.trigger_load(path, window, cx);
                     }).ok();
