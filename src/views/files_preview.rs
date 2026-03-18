@@ -61,7 +61,7 @@ impl FilesPreviewView {
         
         // Search Input State
         let search_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(tr("Please select a .deb file first", "请先选择 .deb 文件"))
+            InputState::new(window, cx).placeholder(tr("files_preview.select_first"))
         });
 
         let mut view = Self {
@@ -104,7 +104,7 @@ impl FilesPreviewView {
         // Reset search
         self.search_state.update(cx, |s, cx| {
             s.set_value(String::new(), window, cx);
-            s.set_placeholder(tr("Loading…", "加载中…"), window, cx);
+            s.set_placeholder(tr("files_preview.loading"), window, cx);
         });
 
         // Clear tree
@@ -256,7 +256,7 @@ impl Render for FilesPreviewView {
                                                             move |menu, _window, _cx| {
                                                                 let path = path.clone();
                                                                 menu.item(
-                                                                    PopupMenuItem::new(tr("Copy Path", "复制路径"))
+                                                                    PopupMenuItem::new(tr("files_preview.copy_path"))
                                                                         .on_click(move |_: &gpui::ClickEvent, _window, cx| {
                                                                             cx.write_to_clipboard(
                                                                                 ClipboardItem::new_string(path.clone()),
@@ -305,7 +305,7 @@ impl FilesPreviewView {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child(tr("← Select a file from the left", "← 从左侧选择文件"))
+                .child(tr("files_preview.select_left"))
                 .into_any_element(),
 
             Some(file) => match &file.kind {
@@ -333,7 +333,7 @@ impl FilesPreviewView {
                         .child(
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(tr("Preview is not supported for this file type", "不支持预览此文件类型")),
+                                .child(tr("files_preview.unsupported_preview")),
                         )
                         .child(
                             div()
@@ -376,11 +376,7 @@ async fn load_files_async(
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(
-                        SharedString::from(format!("{} {} {}", tr("Search", "搜索"), count, tr("files…", "个文件…"))),
-                        w,
-                        c,
-                    )
+                    s.set_placeholder(SharedString::from(rust_i18n::t!("files_preview.search_files", count = count).to_string()), w, c)
                 }).ok();
             }
         }
@@ -396,11 +392,7 @@ async fn load_files_async(
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(
-                        SharedString::from(format!("{}: {}", tr("Error", "错误"), err_msg)),
-                        w,
-                        c,
-                    )
+                    s.set_placeholder(SharedString::from(rust_i18n::t!("files_preview.error", err = err_msg.as_str()).to_string()), w, c)
                 }).ok();
             }
         }
@@ -543,7 +535,7 @@ fn render_image_preview(bytes: &[u8], cx: &mut Context<FilesPreviewView>) -> gpu
             .into_any_element(),
         Err(e) => div()
             .text_color(cx.theme().danger)
-            .child(format!("{}: {}", tr("Failed to render image", "无法渲染图片"), e))
+            .child(rust_i18n::t!("files_preview.render_image_failed", err = e.to_string()).to_string())
             .into_any_element(),
     }
 }

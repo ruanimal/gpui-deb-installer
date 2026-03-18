@@ -1,0 +1,79 @@
+common:
+  install: &install "Install"
+  dependencies: &dependencies "Dependencies"
+  files: &files "Files"
+  installed: &installed "Installed"
+  uninstall: &uninstall "Uninstall"
+  cancel: &cancel "Cancel"
+  package: &package "Package"
+  version: &version "Version"
+  action: &action "Action"
+
+app:
+  name: "Deb Installer"
+  tab:
+    install: *install
+    dependencies: *dependencies
+    files: *files
+    installed: *installed
+warning:
+  pkexec_missing: "Warning: pkexec not found. Package installation/removal will fail.\nPlease install policykit-1 (e.g. sudo apt install policykit-1)."
+install:
+  select_deb_package: "Select .deb package"
+  selected_not_deb: "Selected file is not a .deb package."
+  package_installed: "Package installed successfully '%{pkg}'."
+  installation_failed: "Installation failed."
+  package_uninstalled: "Package uninstalled successfully '%{pkg}'."
+  uninstall_failed: "Uninstall failed."
+  no_dependencies_markdown: "_No dependencies._"
+  dependencies_hint_markdown: "_Select a .deb file in the **Install** tab to view its dependencies._"
+  installing: "Installing '%{pkg}'..."
+  uninstalling: "Uninstalling '%{pkg}'..."
+  idle_hint: "Click the button below to select a .deb file"
+  select_deb_file: "Select .deb File"
+  unknown: "unknown"
+  read_deb_failed: "Failed to read .deb info: %{err}"
+  reading_package_info: "Reading package info..."
+  status:
+    not_installed: "Not installed"
+    already_installed: "Already installed (v%{version})"
+    upgrade: "Upgrade: v%{from}  ->  v%{to}"
+    downgrade: "Downgrade: v%{from}  ->  v%{to}"
+  action:
+    install: *install
+    reinstall: "Reinstall"
+    upgrade: "Upgrade"
+    downgrade: "Downgrade"
+    uninstall: *uninstall
+    cancel: *cancel
+    back: "Back"
+  field:
+    package: *package
+    version: *version
+    file: "File"
+    description: "Description"
+    maintainer: "Maintainer"
+    installed_size: "Installed size"
+    section: "Section"
+  waiting_auth: "Waiting for pkexec authentication..."
+  output: "Output"
+packages:
+  uninstall: *uninstall
+  remove_package_confirm: "Remove package '%{pkg}'?"
+  yes_remove: "Yes, Remove"
+  cancel: *cancel
+  header:
+    package: *package
+    version: *version
+    installed_time: *installed
+    action: *action
+  empty: "No packages installed yet."
+files_preview:
+  select_first: "Please select a .deb file first"
+  loading: "Loading..."
+  copy_path: "Copy Path"
+  select_left: "<- Select a file from the left"
+  unsupported_preview: "Preview is not supported for this file type"
+  search_files: "Search %{count} files..."
+  error: "Error: %{err}"
+  render_image_failed: "Failed to render image: %{err}"

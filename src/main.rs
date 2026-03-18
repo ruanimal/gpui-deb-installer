@@ -4,6 +4,8 @@ mod models;
 mod utils;
 mod views;
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 use gpui::{
     App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
 };
@@ -12,10 +14,12 @@ use gpui_component_assets::Assets;
 use std::path::PathBuf;
 
 use app::AppView;
-use i18n::tr;
+use i18n::{init_locale, tr};
 use utils::dpkg;
 
 fn main() {
+    init_locale();
+
     // Parse command line arguments for deb file path
     let deb_path = std::env::args().nth(1).and_then(|arg| {
         let path = PathBuf::from(&arg);
@@ -32,13 +36,7 @@ fn main() {
             gpui_component::init(cx);
 
             if !dpkg::check_pkexec() {
-                eprintln!(
-                    "{}",
-                    tr(
-                        "Warning: pkexec not found. Package installation/removal will fail.\nPlease install policykit-1 (e.g. sudo apt install policykit-1).",
-                        "警告：未找到 pkexec，安装/卸载功能将无法使用。\n请先安装 policykit-1（例如：sudo apt install policykit-1）。",
-                    )
-                );
+                eprintln!("{}", tr("warning.pkexec_missing"));
             }
 
             let bounds = Bounds::centered(None, size(px(800.), px(600.)), cx);
@@ -47,7 +45,7 @@ fn main() {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
-                        title: Some(tr("Deb Installer", "Deb 安装器").into()),
+                        title: Some(tr("app.name").into()),
                         ..Default::default()
                     }),
                     focus: true,

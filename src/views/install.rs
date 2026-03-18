@@ -148,7 +148,7 @@ impl InstallView {
                         files: true,
                         directories: false,
                         multiple: false,
-                        prompt: Some(tr("Select .deb package", "选择 .deb 包").into()),
+                        prompt: Some(tr("install.select_deb_package").into()),
                     })
                 })
                 .ok();
@@ -162,7 +162,7 @@ impl InstallView {
                     if path.extension().and_then(|e| e.to_str()) != Some("deb") {
                         weak.update(cx, |view, cx| {
                             view.state = InstallState::Done {
-                                message: tr("Selected file is not a .deb package.", "所选文件不是 .deb 包。").into(),
+                                message: tr("install.selected_not_deb").into(),
                                 success: false,
                                 log: String::new(),
                             };
@@ -247,11 +247,7 @@ impl InstallView {
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: format!(
-                                "{} '{}'.",
-                                tr("Package installed successfully", "软件包安装成功"),
-                                pkg_name
-                            ),
+                            message: rust_i18n::t!("install.package_installed", pkg = pkg_name.as_str()).to_string(),
                             success: true,
                             log: final_log,
                         };
@@ -266,7 +262,7 @@ impl InstallView {
                 Err(e) => {
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: tr("Installation failed.", "安装失败。").to_string(),
+                            message: tr("install.installation_failed"),
                             success: false,
                             log: format!("{}\n{}", final_log, e),
                         };
@@ -330,11 +326,7 @@ impl InstallView {
                     let _ = db::remove_package(&pkg_name);
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: format!(
-                                "{} '{}'.",
-                                tr("Package uninstalled successfully", "软件包卸载成功"),
-                                pkg_name
-                            ),
+                            message: rust_i18n::t!("install.package_uninstalled", pkg = pkg_name.as_str()).to_string(),
                             success: true,
                             log: final_log,
                         };
@@ -348,7 +340,7 @@ impl InstallView {
                 Err(e) => {
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: tr("Uninstall failed.", "卸载失败。").to_string(),
+                            message: tr("install.uninstall_failed"),
                             success: false,
                             log: format!("{}\n{}", final_log, e),
                         };
@@ -371,16 +363,12 @@ impl InstallView {
         match &self.state {
             InstallState::FileSelected { info, .. } => {
                 if info.depends.is_empty() {
-                    tr("_No dependencies._", "_无依赖项。_").to_string()
+                    tr("install.no_dependencies_markdown")
                 } else {
                     info.depends.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
                 }
             }
-            _ => tr(
-                "_Select a .deb file in the **Install** tab to view its dependencies._",
-                "_请在**安装**标签页中选择一个 .deb 文件以查看依赖。_",
-            )
-            .to_string(),
+            _ => tr("install.dependencies_hint_markdown"),
         }
     }
 }
@@ -408,10 +396,22 @@ impl Render for InstallView {
                     render_file_selected(path_s, info, iv, inputs, cx)
                 }
                 InstallState::Installing { info, log } => {
-                    render_with_log(&format!("{} '{}'…", tr("Installing", "正在安装"), info.name), log, None, window, cx)
+                    render_with_log(
+                        &rust_i18n::t!("install.installing", pkg = info.name.as_str()).to_string(),
+                        log,
+                        None,
+                        window,
+                        cx,
+                    )
                 }
                 InstallState::Uninstalling { pkg_name, log } => {
-                    render_with_log(&format!("{} '{}'…", tr("Uninstalling", "正在卸载"), pkg_name), log, None, window, cx)
+                    render_with_log(
+                        &rust_i18n::t!("install.uninstalling", pkg = pkg_name.as_str()).to_string(),
+                        log,
+                        None,
+                        window,
+                        cx,
+                    )
                 }
                 InstallState::Done { message, success, log } => {
                     render_with_log("", log, Some((*success, message.clone())), window, cx)
@@ -442,12 +442,12 @@ fn render_idle(cx: &mut Context<InstallView>) -> gpui::AnyElement {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child(tr("Click the button below to select a .deb file", "点击下方按钮选择一个 .deb 文件")),
+                .child(tr("install.idle_hint")),
         )
         .child(
             Button::new("select-file")
                 .primary()
-                .label(tr("Select .deb File", "选择 .deb 文件"))
+                .label(tr("install.select_deb_file"))
                 .on_click(cx.listener(|view, _ev, window, cx| {
                     view.select_file(window, cx);
                 })),
@@ -533,7 +533,7 @@ async fn load_deb_async(
                 let size_v = if info.installed_size_kb > 0 {
                     format!("{} KB", info.installed_size_kb)
                 } else {
-                    tr("unknown", "未知").to_string()
+                    tr("install.unknown")
                 };
                 let sect_v = info.section.clone().unwrap_or_default();
 
@@ -549,7 +549,7 @@ async fn load_deb_async(
         Err(e) => {
             weak.update(cx, |view, cx| {
                 view.state = InstallState::Done {
-                    message: format!("{}: {}", tr("Failed to read .deb info", "读取 .deb 信息失败"), e),
+                    message: rust_i18n::t!("install.read_deb_failed", err = e.to_string()).to_string(),
                     success: false,
                     log: String::new(),
                 };
@@ -566,7 +566,7 @@ fn render_loading_info(path: String) -> gpui::AnyElement {
         .items_center()
         .justify_center()
         .gap_2()
-        .child(div().child(tr("Reading package info…", "正在读取包信息…")))
+        .child(div().child(tr("install.reading_package_info")))
         .child(div().text_sm().child(path))
         .into_any_element()
 }
@@ -580,22 +580,22 @@ fn render_file_selected(
 ) -> gpui::AnyElement {
     // Determine install status label and button label
     let (status_text, status_color, install_label) = match &installed_version {
-        None => (tr("Not installed", "未安装").to_string(), None, tr("Install", "安装")),
+        None => (tr("install.status.not_installed"), None, tr("install.action.install")),
         Some(v) => match crate::utils::dpkg::compare_versions(v, &info.version) {
             std::cmp::Ordering::Equal => (
-                format!("{} (v{})", tr("Already installed", "已安装"), v),
+                rust_i18n::t!("install.status.already_installed", version = v.as_str()).to_string(),
                 Some("warning"),
-                tr("Reinstall", "重新安装"),
+                tr("install.action.reinstall"),
             ),
             std::cmp::Ordering::Less => (
-                format!("{}: v{}  →  v{}", tr("Upgrade", "升级"), v, info.version),
+                rust_i18n::t!("install.status.upgrade", from = v.as_str(), to = info.version.as_str()).to_string(),
                 Some("success"),
-                tr("Upgrade", "升级"),
+                tr("install.action.upgrade"),
             ),
             std::cmp::Ordering::Greater => (
-                format!("{}: v{}  →  v{}", tr("Downgrade", "降级"), v, info.version),
+                rust_i18n::t!("install.status.downgrade", from = v.as_str(), to = info.version.as_str()).to_string(),
                 Some("danger"),
-                tr("Downgrade", "降级"),
+                tr("install.action.downgrade"),
             ),
         },
     };
@@ -666,13 +666,13 @@ fn render_file_selected(
                 )
                 .child(div().h(gpui::px(1.)).bg(cx.theme().border))
                 // Selectable info rows
-                .child(info_row_input(tr("Package", "包名"), &inputs.name, cx))
-                .child(info_row_input(tr("Version", "版本"), &inputs.version, cx))
-                .child(info_row_input(tr("File", "文件"), &inputs.path, cx))
-                .child(info_row_input(tr("Description", "描述"), &inputs.description, cx))
-                .child(info_row_input(tr("Maintainer", "维护者"), &inputs.maintainer, cx))
-                .child(info_row_input(tr("Installed size", "安装大小"), &inputs.size, cx))
-                .child(info_row_input(tr("Section", "分类"), &inputs.section, cx)),
+                .child(info_row_input(tr("install.field.package"), &inputs.name, cx))
+                .child(info_row_input(tr("install.field.version"), &inputs.version, cx))
+                .child(info_row_input(tr("install.field.file"), &inputs.path, cx))
+                .child(info_row_input(tr("install.field.description"), &inputs.description, cx))
+                .child(info_row_input(tr("install.field.maintainer"), &inputs.maintainer, cx))
+                .child(info_row_input(tr("install.field.installed_size"), &inputs.size, cx))
+                .child(info_row_input(tr("install.field.section"), &inputs.section, cx)),
         )
         .child(
             h_flex()
@@ -690,7 +690,7 @@ fn render_file_selected(
                     el.child(
                         Button::new("uninstall-btn")
                             .danger()
-                            .label(tr("Uninstall", "卸载"))
+                            .label(tr("install.action.uninstall"))
                             .on_click(cx.listener(|view, _ev, window, cx| {
                                 view.uninstall_package(window, cx);
                             })),
@@ -698,7 +698,7 @@ fn render_file_selected(
                 })
                 .child(
                     Button::new("cancel-btn")
-                        .label(tr("Cancel", "取消"))
+                        .label(tr("install.action.cancel"))
                         .on_click(cx.listener(|view, _ev, _window, cx| {
                             view.reset(cx);
                         })),
@@ -718,7 +718,7 @@ fn render_with_log(
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
     let log_text = if log.is_empty() {
-        tr("Waiting for pkexec authentication…", "等待 pkexec 认证…").to_string()
+        tr("install.waiting_auth")
     } else {
         log.to_string()
     };
@@ -767,7 +767,7 @@ fn render_with_log(
                         .border_color(cx.theme().border)
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(tr("Output", "输出")),
+                        .child(tr("install.output")),
                 )
                 .child(
                     div().flex_1().overflow_hidden().child(
@@ -782,7 +782,7 @@ fn render_with_log(
             el.child(
                 Button::new("reset-btn")
                     .primary()
-                    .label(tr("Back", "返回"))
+                    .label(tr("install.action.back"))
                     .on_click(cx.listener(|view, _ev, _window, cx| {
                         view.reset(cx);
                     })),
@@ -795,7 +795,7 @@ fn render_with_log(
 /// The Input is disabled (read-only) and has no visible appearance,
 /// so it looks like plain text but supports mouse selection and Ctrl+C.
 fn info_row_input(
-    label: &str,
+    label: String,
     input: &Entity<InputState>,
     cx: &mut Context<InstallView>,
 ) -> impl IntoElement {
@@ -807,7 +807,7 @@ fn info_row_input(
                 .w(gpui::px(130.))
                 .text_color(cx.theme().muted_foreground)
                 .flex_shrink_0()
-                .child(label.to_string()),
+                .child(label),
         )
         .child(div().flex_1().child(Input::new(input).disabled(true).appearance(false)))
 }
