@@ -1,4 +1,5 @@
 mod app;
+mod i18n;
 mod models;
 mod utils;
 mod views;
@@ -11,6 +12,7 @@ use gpui_component_assets::Assets;
 use std::path::PathBuf;
 
 use app::AppView;
+use i18n::tr;
 use utils::dpkg;
 
 fn main() {
@@ -31,8 +33,11 @@ fn main() {
 
             if !dpkg::check_pkexec() {
                 eprintln!(
-                    "Warning: pkexec not found. Package installation/removal will fail.\n\
-                     Please install policykit-1 (e.g. sudo apt install policykit-1)."
+                    "{}",
+                    tr(
+                        "Warning: pkexec not found. Package installation/removal will fail.\nPlease install policykit-1 (e.g. sudo apt install policykit-1).",
+                        "警告：未找到 pkexec，安装/卸载功能将无法使用。\n请先安装 policykit-1（例如：sudo apt install policykit-1）。",
+                    )
                 );
             }
 
@@ -42,7 +47,7 @@ fn main() {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("Deb Installer".into()),
+                        title: Some(tr("Deb Installer", "Deb 安装器").into()),
                         ..Default::default()
                     }),
                     focus: true,

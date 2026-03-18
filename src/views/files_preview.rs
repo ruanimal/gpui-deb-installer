@@ -14,6 +14,7 @@ use gpui_component::{
 };
 use std::path::PathBuf;
 
+use crate::i18n::tr;
 use crate::utils::deb_files::{DebFileEntry, DebFileKind, extract_previewable_files};
 
 // ---------------------------------------------------------------------------
@@ -60,7 +61,7 @@ impl FilesPreviewView {
 
         // Search Input State
         let search_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("请先选择 .deb 文件")
+            InputState::new(window, cx).placeholder(tr("Please select a .deb file first", "请先选择 .deb 文件"))
         });
 
         let mut view = Self {
@@ -103,7 +104,7 @@ impl FilesPreviewView {
         // Reset search
         self.search_state.update(cx, |s, cx| {
             s.set_value(String::new(), window, cx);
-            s.set_placeholder("加载中…", window, cx);
+            s.set_placeholder(tr("Loading…", "加载中…"), window, cx);
         });
 
         // Clear tree
@@ -255,7 +256,7 @@ impl Render for FilesPreviewView {
                                                             move |menu, _window, _cx| {
                                                                 let path = path.clone();
                                                                 menu.item(
-                                                                    PopupMenuItem::new("复制路径")
+                                                                    PopupMenuItem::new(tr("Copy Path", "复制路径"))
                                                                         .on_click(move |_: &gpui::ClickEvent, _window, cx| {
                                                                             cx.write_to_clipboard(
                                                                                 ClipboardItem::new_string(path.clone()),
@@ -304,7 +305,7 @@ impl FilesPreviewView {
                 .items_center()
                 .justify_center()
                 .text_color(cx.theme().muted_foreground)
-                .child("← 从左侧选择文件")
+                .child(tr("← Select a file from the left", "← 从左侧选择文件"))
                 .into_any_element(),
 
             Some(file) => match &file.kind {
@@ -332,7 +333,7 @@ impl FilesPreviewView {
                         .child(
                             div()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("不支持预览此文件类型"),
+                                .child(tr("Preview is not supported for this file type", "不支持预览此文件类型")),
                         )
                         .child(
                             div()
@@ -375,7 +376,11 @@ async fn load_files_async(
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(SharedString::from(format!("搜索 {} 个文件…", count)), w, c)
+                    s.set_placeholder(
+                        SharedString::from(format!("{} {} {}", tr("Search", "搜索"), count, tr("files…", "个文件…"))),
+                        w,
+                        c,
+                    )
                 }).ok();
             }
         }
@@ -391,7 +396,11 @@ async fn load_files_async(
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(SharedString::from(format!("错误: {}", err_msg)), w, c)
+                    s.set_placeholder(
+                        SharedString::from(format!("{}: {}", tr("Error", "错误"), err_msg)),
+                        w,
+                        c,
+                    )
                 }).ok();
             }
         }
@@ -548,7 +557,7 @@ fn render_image_preview(path: &str, bytes: &[u8], cx: &mut Context<FilesPreviewV
             .into_any_element(),
         Err(e) => div()
             .text_color(cx.theme().danger)
-            .child(format!("无法渲染图片: {}", e))
+            .child(format!("{}: {}", tr("Failed to render image", "无法渲染图片"), e))
             .into_any_element(),
     }
 }

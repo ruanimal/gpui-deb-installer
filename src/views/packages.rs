@@ -9,6 +9,7 @@ use gpui_component::{
 };
 use std::sync::Arc;
 
+use crate::i18n::tr;
 use crate::models::{db, package::InstalledPackage};
 use crate::views::install::InstallView;
 
@@ -89,7 +90,7 @@ impl Render for PackagesView {
                 Button::new(("uninstall", i))
                     .danger()
                     .with_size(Size::Small)
-                    .label("Uninstall")
+                    .label(tr("Uninstall", "卸载"))
                     .on_click(cx.listener(move |view, _ev, _window, cx| {
                         view.start_uninstall(name.clone(), cx);
                     }))
@@ -130,13 +131,13 @@ impl Render for PackagesView {
                             div()
                                 .flex_1()
                                 .text_color(cx.theme().foreground)
-                                .child(format!("Remove package '{}'?", name)),
+                                .child(format!("{} '{}'?", tr("Remove package", "删除软件包"), name)),
                         )
                         .child(
                             Button::new("confirm-yes")
                                 .danger()
                                 .with_size(Size::Small)
-                                .label("Yes, Remove")
+                                .label(tr("Yes, Remove", "是，删除"))
                                 .on_click(cx.listener(move |view, _ev, window, cx| {
                                     view.confirm_target = Some(name_confirm.clone());
                                     view.confirm_uninstall(window, cx);
@@ -145,7 +146,7 @@ impl Render for PackagesView {
                         .child(
                             Button::new("confirm-no")
                                 .with_size(Size::Small)
-                                .label("Cancel")
+                                .label(tr("Cancel", "取消"))
                                 .on_click(cx.listener(|view, _ev, _window, cx| {
                                     view.cancel_confirm(cx);
                                 })),
@@ -162,10 +163,10 @@ impl Render for PackagesView {
                     .bg(cx.theme().tab_bar)
                     .text_color(cx.theme().muted_foreground)
                     .font_weight(FontWeight::BOLD)
-                    .child(div().w(gpui::px(200.)).child("Package"))
-                    .child(div().w(gpui::px(120.)).child("Version"))
-                    .child(div().flex_1().child("Installed"))
-                    .child(div().w(gpui::px(100.)).child("Action")),
+                    .child(div().w(gpui::px(200.)).child(tr("Package", "包名")))
+                    .child(div().w(gpui::px(120.)).child(tr("Version", "版本")))
+                    .child(div().flex_1().child(tr("Installed", "安装时间")))
+                    .child(div().w(gpui::px(100.)).child(tr("Action", "操作"))),
             )
             // Empty state
             .when(rows_count == 0, |el| {
@@ -175,7 +176,7 @@ impl Render for PackagesView {
                         .items_center()
                         .justify_center()
                         .text_color(cx.theme().muted_foreground)
-                        .child("No packages installed yet."),
+                        .child(tr("No packages installed yet.", "暂无已安装软件包。")),
                 )
             })
             // Data rows
