@@ -1,0 +1,79 @@
+common:
+  install: &install "安装"
+  dependencies: &dependencies "依赖"
+  files: &files "文件"
+  installed: &installed "已安装"
+  uninstall: &uninstall "卸载"
+  cancel: &cancel "取消"
+  package: &package "包名"
+  version: &version "版本"
+  action: &action "操作"
+
+app:
+  name: "Deb 安装器"
+  tab:
+    install: *install
+    dependencies: *dependencies
+    files: *files
+    installed: *installed
+warning:
+  pkexec_missing: "警告：未找到 pkexec，安装/卸载功能将无法使用。\n请先安装 policykit-1（例如：sudo apt install policykit-1）。"
+install:
+  select_deb_package: "选择 .deb 包"
+  selected_not_deb: "所选文件不是 .deb 包。"
+  package_installed: "软件包安装成功 '%{pkg}'。"
+  installation_failed: "安装失败。"
+  package_uninstalled: "软件包卸载成功 '%{pkg}'。"
+  uninstall_failed: "卸载失败。"
+  no_dependencies_markdown: "_无依赖项。_"
+  dependencies_hint_markdown: "_请在**安装**标签页中选择一个 .deb 文件以查看依赖。_"
+  installing: "正在安装 '%{pkg}'..."
+  uninstalling: "正在卸载 '%{pkg}'..."
+  idle_hint: "点击下方按钮选择一个 .deb 文件"
+  select_deb_file: "选择 .deb 文件"
+  unknown: "未知"
+  read_deb_failed: "读取 .deb 信息失败: %{err}"
+  reading_package_info: "正在读取包信息..."
+  status:
+    not_installed: "未安装"
+    already_installed: "已安装 (v%{version})"
+    upgrade: "升级: v%{from}  ->  v%{to}"
+    downgrade: "降级: v%{from}  ->  v%{to}"
+  action:
+    install: *install
+    reinstall: "重新安装"
+    upgrade: "升级"
+    downgrade: "降级"
+    uninstall: *uninstall
+    cancel: *cancel
+    back: "返回"
+  field:
+    package: *package
+    version: *version
+    file: "文件"
+    description: "描述"
+    maintainer: "维护者"
+    installed_size: "安装大小"
+    section: "分类"
+  waiting_auth: "等待 pkexec 认证..."
+  output: "输出"
+packages:
+  uninstall: *uninstall
+  remove_package_confirm: "删除软件包 '%{pkg}'?"
+  yes_remove: "是，删除"
+  cancel: *cancel
+  header:
+    package: *package
+    version: *version
+    installed_time: "安装时间"
+    action: *action
+  empty: "暂无已安装软件包。"
+files_preview:
+  select_first: "请先选择 .deb 文件"
+  loading: "加载中..."
+  copy_path: "复制路径"
+  select_left: "<- 从左侧选择文件"
+  unsupported_preview: "不支持预览此文件类型"
+  search_files: "搜索 %{count} 个文件..."
+  error: "错误: %{err}"
+  render_image_failed: "无法渲染图片: %{err}"

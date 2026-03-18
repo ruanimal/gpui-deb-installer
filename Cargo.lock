@@ -2296,6 +2296,7 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "rust-i18n",
  "serde",
  "serde_json",
  "tar",

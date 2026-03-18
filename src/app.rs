@@ -63,7 +63,7 @@ impl AppView {
             let files_weak = files_preview_view.downgrade();
             install_view.update(cx, |view, _cx| {
                 view.on_deb_loaded = Some(Arc::new(move |path: PathBuf, window: &mut Window, cx: &mut App| {
-                    window.set_window_title(&format!("{} - {}", tr("Deb Installer", "Deb 安装器"), path.display()));
+                    window.set_window_title(&format!("{} - {}", tr("app.name"), path.display()));
                     files_weak.update(cx, |fv, cx| {
                         fv.trigger_load(path, window, cx);
                     }).ok();
@@ -94,10 +94,10 @@ impl Render for AppView {
                         view.active_tab = *ix;
                         cx.notify();
                     }))
-                    .child(Tab::new().label(tr("Install", "安装")))
-                    .child(Tab::new().label(tr("Dependencies", "依赖")))
-                    .child(Tab::new().label(tr("Files", "文件")))
-                    .child(Tab::new().label(tr("Installed", "已安装"))),
+                    .child(Tab::new().label(tr("app.tab.install")))
+                    .child(Tab::new().label(tr("app.tab.dependencies")))
+                    .child(Tab::new().label(tr("app.tab.files")))
+                    .child(Tab::new().label(tr("app.tab.installed"))),
             )
             .child(
                 div()
