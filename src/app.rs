@@ -12,6 +12,7 @@ use crate::views::{
     packages::PackagesView,
     files_preview::FilesPreviewView,
 };
+use crate::i18n::tr;
 
 pub struct AppView {
     active_tab: usize,
@@ -62,7 +63,7 @@ impl AppView {
             let files_weak = files_preview_view.downgrade();
             install_view.update(cx, |view, _cx| {
                 view.on_deb_loaded = Some(Arc::new(move |path: PathBuf, window: &mut Window, cx: &mut App| {
-                    window.set_window_title(&format!("Deb Installer - {}", path.display()));
+                    window.set_window_title(&format!("{} - {}", tr("Deb Installer", "Deb 安装器"), path.display()));
                     files_weak.update(cx, |fv, cx| {
                         fv.trigger_load(path, window, cx);
                     }).ok();
@@ -93,10 +94,10 @@ impl Render for AppView {
                         view.active_tab = *ix;
                         cx.notify();
                     }))
-                    .child(Tab::new().label("Install"))
-                    .child(Tab::new().label("Dependencies"))
-                    .child(Tab::new().label("Files"))
-                    .child(Tab::new().label("Installed")),
+                    .child(Tab::new().label(tr("Install", "安装")))
+                    .child(Tab::new().label(tr("Dependencies", "依赖")))
+                    .child(Tab::new().label(tr("Files", "文件")))
+                    .child(Tab::new().label(tr("Installed", "已安装"))),
             )
             .child(
                 div()
