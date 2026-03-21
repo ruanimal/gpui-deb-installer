@@ -69,17 +69,26 @@ pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
             Err(_) => continue,
         };
 
-        // Read the first 8 KB to determine type; then read the rest if needed.
-        const SNIFF_BYTES: usize = 8192;
         const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024; // 4 MB limit for text
         const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024; // 16 MB limit for images
 
-        let mut buf = Vec::new();
+        // Skip known binary extensions early — avoids reading large .so/.ttf/etc into memory
+        // Also skip files exceeding the largest preview limit (IMAGE > TEXT)
+        let file_size = header.size().unwrap_or(0) as usize;
+        if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES {
+            entries_out.push(DebFileEntry {
+                path: raw_path,
+                kind: DebFileKind::Unsupported,
+            });
+            continue;
+        }
+
+        let mut buf = Vec::with_capacity(file_size);
         entry
             .read_to_end(&mut buf)
             .unwrap_or_default();
 
-        let kind = categorize(&raw_path, &buf, SNIFF_BYTES, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
+        let kind = categorize(&raw_path, buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
 
         entries_out.push(DebFileEntry {
             path: raw_path,
@@ -99,8 +108,7 @@ pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
 
 fn categorize(
     path: &str,
-    data: &[u8],
-    _sniff: usize,
+    data: Vec<u8>,
     max_text: usize,
     max_image: usize,
 ) -> DebFileKind {
@@ -116,22 +124,41 @@ fn categorize(
     ];
     if IMAGE_EXTS.contains(&ext.as_str()) {
         if data.len() <= max_image {
-            return DebFileKind::Image(data.to_vec());
+            return DebFileKind::Image(data); // move, no copy
         } else {
             return DebFileKind::Unsupported;
         }
     }
 
     // ---- Image by magic bytes ----------------------------------------------
-    if is_image_magic(data) {
+    if is_image_magic(&data) {
         if data.len() <= max_image {
-            return DebFileKind::Image(data.to_vec());
+            return DebFileKind::Image(data); // move, no copy
         } else {
             return DebFileKind::Unsupported;
         }
     }
 
-    // ---- Known binary extensions → Unsupported ----------------------------
+    // ---- Too large for text preview ----------------------------------------
+    if data.len() > max_text {
+        return DebFileKind::Unsupported;
+    }
+
+    // ---- Sniff for binary content: null bytes are a strong indicator --------
+    let sniff_len = data.len().min(8192);
+    if data[..sniff_len].contains(&0u8) {
+        return DebFileKind::Unsupported;
+    }
+
+    // ---- Try to decode as UTF-8 (move into String, no extra copy) ----------
+    match String::from_utf8(data) {
+        Ok(text) => DebFileKind::Text(text),
+        Err(_) => DebFileKind::Unsupported,
+    }
+}
+
+/// Check extension before reading file content — avoids pulling large binaries into memory.
+fn is_known_binary_ext(path: &str) -> bool {
     const BINARY_EXTS: &[&str] = &[
         "so", "a", "o", "ko", "deb", "ar", "gz", "xz", "bz2", "zst", "lz4", "lzma",
         "zip", "tar", "whl", "egg", "pyc", "pyo", "class", "jar", "war",
@@ -141,26 +168,12 @@ fn categorize(
         "ttf", "otf", "woff", "woff2", "eot",
         "pdf",
     ];
-    if BINARY_EXTS.contains(&ext.as_str()) {
-        return DebFileKind::Unsupported;
-    }
-
-    // ---- Too large for text preview ----------------------------------------
-    if data.len() > max_text {
-        return DebFileKind::Unsupported;
-    }
-
-    // ---- Sniff for binary content: null bytes are a strong indicator --------
-    let sniff = &data[..data.len().min(8192)];
-    if sniff.contains(&0u8) {
-        return DebFileKind::Unsupported;
-    }
-
-    // ---- Try to decode as UTF-8 -------------------------------------------
-    match String::from_utf8(data.to_vec()) {
-        Ok(text) => DebFileKind::Text(text),
-        Err(_) => DebFileKind::Unsupported,
-    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    BINARY_EXTS.contains(&ext.as_str())
 }
 
 fn is_image_magic(data: &[u8]) -> bool {
