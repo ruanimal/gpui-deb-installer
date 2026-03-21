@@ -47,6 +47,7 @@ install:
     uninstall: *uninstall
     cancel: *cancel
     back: "返回"
+    auto_close: "安装后自动关闭"
   field:
     package: *package
     version: *version

@@ -7,6 +7,7 @@ use gpui::{
 use gpui_component::{
     ActiveTheme,
     button::{Button, ButtonVariants as _},
+    checkbox::Checkbox,
     h_flex, v_flex,
     input::{Input, InputEvent, InputState},
     text::TextView,
@@ -59,6 +60,7 @@ struct InfoInputs {
 pub struct InstallView {
     state: InstallState,
     info_inputs: InfoInputs,
+    auto_close: bool,
     _subscriptions: Vec<Subscription>,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -112,6 +114,7 @@ impl InstallView {
         let mut view = Self {
             state: InstallState::Idle,
             info_inputs: inputs,
+            auto_close: false,
             _subscriptions: subscriptions,
             on_installed: None,
             on_deb_loaded: None,
@@ -197,6 +200,7 @@ impl InstallView {
         cx.notify();
 
         let on_installed = self.on_installed.clone();
+        let auto_close = self.auto_close;
 
         cx.spawn_in(window, async move |weak, cx| {
             let (log_tx, log_rx) = async_channel::unbounded::<String>();
@@ -257,6 +261,13 @@ impl InstallView {
 
                     if let Some(cb) = on_installed {
                         cx.update(|window, cx| cb(window, cx)).ok();
+                    }
+
+                    if auto_close {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_secs(2))
+                            .await;
+                        cx.update(|_window, cx| cx.quit()).ok();
                     }
                 }
                 Err(e) => {
@@ -391,9 +402,10 @@ impl Render for InstallView {
                 InstallState::FileSelected { path, info, installed_version } => {
                     let path_s = path.to_string_lossy().to_string();
                     let iv = installed_version.clone();
+                    let auto_close = self.auto_close;
                     // SAFETY: borrowing different fields simultaneously is allowed
                     let inputs = &self.info_inputs;
-                    render_file_selected(path_s, info, iv, inputs, cx)
+                    render_file_selected(path_s, info, iv, auto_close, inputs, cx)
                 }
                 InstallState::Installing { info, log } => {
                     render_with_log(
@@ -575,6 +587,7 @@ fn render_file_selected(
     _path: String,
     info: &DebInfo,
     installed_version: Option<String>,
+    auto_close: bool,
     inputs: &InfoInputs,
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
@@ -701,6 +714,17 @@ fn render_file_selected(
                         .label(tr("install.action.cancel"))
                         .on_click(cx.listener(|view, _ev, _window, cx| {
                             view.reset(cx);
+                        })),
+                )
+                .child(
+                    div().flex_1()
+                )
+                .child(
+                    Checkbox::new("auto-close-cb")
+                        .label(tr("install.action.auto_close"))
+                        .checked(auto_close)
+                        .on_click(cx.listener(|view, checked: &bool, _window, _cx| {
+                            view.auto_close = *checked;
                         })),
                 ),
         )

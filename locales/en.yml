@@ -47,6 +47,7 @@ install:
     uninstall: *uninstall
     cancel: *cancel
     back: "Back"
+    auto_close: "Close after install"
   field:
     package: *package
     version: *version
