@@ -516,42 +516,38 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn render_image_preview(path: &str, bytes: &[u8], cx: &mut Context<FilesPreviewView>) -> gpui::AnyElement {
-    use std::io::Write;
-
-    // Use a unique filename in the temp directory based on the file path to avoid conflicts
-    let hash = {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        hasher.finish()
-    };
-    let extension = std::path::Path::new(path)
+fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreviewView>) -> gpui::AnyElement {
+    let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .unwrap_or("tmp");
+        .unwrap_or("")
+        .to_lowercase();
 
-    let tmp = std::env::temp_dir().join(format!("gpui_deb_preview_{:x}.{}", hash, extension));
+    let format = match ext.as_str() {
+        "png" => gpui::ImageFormat::Png,
+        "jpg" | "jpeg" => gpui::ImageFormat::Jpeg,
+        "gif" => gpui::ImageFormat::Gif,
+        "webp" => gpui::ImageFormat::Webp,
+        "bmp" => gpui::ImageFormat::Bmp,
+        "svg" => gpui::ImageFormat::Svg,
+        "tif" | "tiff" => gpui::ImageFormat::Tiff,
+        _ => gpui::ImageFormat::Png, // fallback, let the decoder figure it out
+    };
 
-    match std::fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes)) {
-        Ok(_) => div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .child(
-                img(tmp)
-                    .max_w_full()
-                    .max_h_full(),
-            )
-            .into_any_element(),
-        Err(e) => div()
-            .text_color(cx.theme().danger)
-            .child(rust_i18n::t!("files_preview.render_image_failed", err = e.to_string()).to_string())
-            .into_any_element(),
-    }
+    let image = std::sync::Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()));
+
+    div()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p_4()
+        .child(
+            img(image)
+                .max_w_full()
+                .max_h_full(),
+        )
+        .into_any_element()
 }
 
 fn detect_language(path: &str) -> &'static str {
