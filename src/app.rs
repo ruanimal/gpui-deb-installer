@@ -71,6 +71,18 @@ impl AppView {
             });
         }
 
+        // When the install_view resets, clear the files preview.
+        {
+            let files_weak = files_preview_view.downgrade();
+            install_view.update(cx, |view, _cx| {
+                view.on_reset = Some(Arc::new(move |window: &mut Window, cx: &mut App| {
+                    files_weak.update(cx, |fv, cx| {
+                        fv.reset(window, cx);
+                    }).ok();
+                }));
+            });
+        }
+
         Self {
             active_tab: 0,
             install_view,

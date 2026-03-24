@@ -91,6 +91,20 @@ impl FilesPreviewView {
     // Actions
     // -----------------------------------------------------------------------
 
+    /// Called from AppView when the install view resets (e.g. Back button).
+    pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.load_state = FilesLoadState::Idle;
+        self.last_loaded_path = None;
+        self.selected = None;
+        self.tree_state.update(cx, |state, cx| state.set_items(vec![], cx));
+        self.editor_state.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+        self.search_state.update(cx, |s, cx| {
+            s.set_value(String::new(), window, cx);
+            s.set_placeholder(tr("files_preview.select_first"), window, cx);
+        });
+        cx.notify();
+    }
+
     /// Called from AppView when a new .deb is selected.
     /// Avoids duplicate loads for the same path.
     pub fn trigger_load(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {

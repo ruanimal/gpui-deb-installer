@@ -12,22 +12,22 @@ pub fn check_pkexec() -> bool {
         .unwrap_or(false)
 }
 
-/// Runs `pkexec dpkg -i`, streams stdout+stderr line-by-line through `log_tx`,
-/// closes the channel when done, then returns Ok/Err for the exit status.
+/// Runs `pkexec apt-get install -y <path>`, streams stdout+stderr line-by-line through `log_tx`.
+/// apt-get handles dependency resolution automatically.
 pub fn install_deb_streaming(path: PathBuf, log_tx: async_channel::Sender<String>) -> Result<()> {
     let mut child = Command::new("pkexec")
-        .args(["dpkg", "-i"])
+        .args(["apt-get", "install", "-y"])
         .arg(&path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("failed to launch pkexec dpkg -i")?;
+        .context("failed to launch pkexec apt-get install")?;
 
     pipe_output_to_channel(child.stdout.take(), child.stderr.take(), log_tx);
 
     let status = child.wait()?;
     if !status.success() {
-        bail!("dpkg -i failed (exit {})", status);
+        bail!("apt-get install failed (exit {})", status);
     }
     Ok(())
 }

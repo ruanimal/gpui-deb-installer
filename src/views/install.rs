@@ -66,6 +66,8 @@ pub struct InstallView {
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
     /// Called when a .deb file has been successfully loaded (path provided).
     pub on_deb_loaded: Option<Arc<dyn Fn(PathBuf, &mut Window, &mut App) + 'static>>,
+    /// Called when the view resets to Idle (e.g. Back button or Cancel).
+    pub on_reset: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl InstallView {
@@ -118,6 +120,7 @@ impl InstallView {
             _subscriptions: subscriptions,
             on_installed: None,
             on_deb_loaded: None,
+            on_reset: None,
         };
 
         // If an initial deb path was provided, schedule loading it
@@ -364,9 +367,12 @@ impl InstallView {
         .detach();
     }
 
-    fn reset(&mut self, cx: &mut Context<Self>) {
+    fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
         cx.notify();
+        if let Some(cb) = self.on_reset.clone() {
+            cb(window, cx);
+        }
     }
 
     /// Returns Markdown content for the Dependencies tab.
@@ -712,8 +718,8 @@ fn render_file_selected(
                 .child(
                     Button::new("cancel-btn")
                         .label(tr("install.action.cancel"))
-                        .on_click(cx.listener(|view, _ev, _window, cx| {
-                            view.reset(cx);
+                        .on_click(cx.listener(|view, _ev, window, cx| {
+                            view.reset(window, cx);
                         })),
                 )
                 .child(
@@ -807,8 +813,8 @@ fn render_with_log(
                 Button::new("reset-btn")
                     .primary()
                     .label(tr("install.action.back"))
-                    .on_click(cx.listener(|view, _ev, _window, cx| {
-                        view.reset(cx);
+                    .on_click(cx.listener(|view, _ev, window, cx| {
+                        view.reset(window, cx);
                     })),
             )
         })
