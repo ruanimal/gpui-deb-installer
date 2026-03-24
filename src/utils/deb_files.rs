@@ -1,42 +1,52 @@
 use anyhow::{Context, Result};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/// The kind of content we extracted (or decided we can't preview).
+/// The kind of content we can preview.
 #[derive(Debug, Clone)]
 pub enum DebFileKind {
-    /// UTF-8 text file (source code, config, plain text, etc.)
-    Text(String),
-    /// Raw image bytes (PNG, JPEG, GIF, SVG, …)
-    Image(Vec<u8>),
-    /// Everything else – not previewable
+    Text,
+    Image,
     Unsupported,
 }
 
 /// A single entry from inside the .deb package.
+/// Content is NOT held in memory — it lives on disk inside the temp directory.
 #[derive(Debug, Clone)]
 pub struct DebFileEntry {
     /// Full path as stored in the tar archive (e.g. `./usr/bin/foo`)
     pub path: String,
     pub kind: DebFileKind,
+    /// Absolute path to the cached file on disk (None for Unsupported files
+    /// that were not extracted).
+    pub cache_path: Option<PathBuf>,
+}
+
+/// Result of extracting a .deb: the entry list plus the temp directory handle.
+/// The temp directory is deleted when this struct is dropped.
+pub struct ExtractedDeb {
+    pub entries: Vec<DebFileEntry>,
+    /// Keep alive — dropping this removes the temp directory.
+    pub _temp_dir: TempDir,
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Spawn `dpkg --fsys-tarfile <path>`, pipe its output through the `tar`
-/// crate in a single pass, and return previewable file entries.
+/// Spawn `dpkg --fsys-tarfile <path>`, extract previewable files to a temp
+/// directory, and return lightweight metadata entries.
 ///
-/// This is a **blocking** function and should be called from a background
-/// executor (e.g. `cx.background_executor().spawn(...)`).
-pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
-    // Launch dpkg --fsys-tarfile and capture its stdout as a tar stream.
+/// This is a **blocking** function — call from a background executor.
+pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
+    let temp_dir = TempDir::new().context("failed to create temp directory")?;
+
     let mut child = Command::new("dpkg")
         .arg("--fsys-tarfile")
         .arg(path)
@@ -58,9 +68,7 @@ pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
 
         let header = entry.header();
 
-        // Only regular files
         if header.entry_type() != tar::EntryType::Regular {
-            // Still need to consume the entry to advance the stream
             continue;
         }
 
@@ -69,37 +77,59 @@ pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
             Err(_) => continue,
         };
 
-        const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024; // 4 MB limit for text
-        const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024; // 16 MB limit for images
+        const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
+        const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
-        // Skip known binary extensions early — avoids reading large .so/.ttf/etc into memory
-        // Also skip files exceeding the largest preview limit (IMAGE > TEXT)
         let file_size = header.size().unwrap_or(0) as usize;
+
+        // Skip known binary extensions or oversized files
         if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES {
             entries_out.push(DebFileEntry {
                 path: raw_path,
                 kind: DebFileKind::Unsupported,
+                cache_path: None,
             });
             continue;
         }
 
+        // Read content to classify
         let mut buf = Vec::with_capacity(file_size);
-        entry
-            .read_to_end(&mut buf)
-            .unwrap_or_default();
+        entry.read_to_end(&mut buf).unwrap_or_default();
 
-        let kind = categorize(&raw_path, buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
+        let kind = categorize(&raw_path, &buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
+
+        let cache_path = match &kind {
+            DebFileKind::Unsupported => None,
+            _ => {
+                // Write to temp dir, preserving relative path structure
+                let rel = raw_path.trim_start_matches("./");
+                let dest = temp_dir.path().join(rel);
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                std::fs::write(&dest, &buf).ok();
+                Some(dest)
+            }
+        };
 
         entries_out.push(DebFileEntry {
             path: raw_path,
             kind,
+            cache_path,
         });
     }
 
-    // Wait for the child process (best-effort – don't fail on non-zero exit)
     let _ = child.wait();
 
-    Ok(entries_out)
+    Ok(ExtractedDeb {
+        entries: entries_out,
+        _temp_dir: temp_dir,
+    })
+}
+
+/// Read file content from the cache on demand.
+pub fn read_cached_file(entry: &DebFileEntry) -> Option<Vec<u8>> {
+    entry.cache_path.as_ref().and_then(|p| std::fs::read(p).ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +138,7 @@ pub fn extract_previewable_files(path: &Path) -> Result<Vec<DebFileEntry>> {
 
 fn categorize(
     path: &str,
-    data: Vec<u8>,
+    data: &[u8],
     max_text: usize,
     max_image: usize,
 ) -> DebFileKind {
@@ -118,46 +148,33 @@ fn categorize(
         .unwrap_or("")
         .to_lowercase();
 
-    // ---- Image by extension ------------------------------------------------
     const IMAGE_EXTS: &[&str] = &[
         "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "tiff", "tif", "svg",
     ];
     if IMAGE_EXTS.contains(&ext.as_str()) {
-        if data.len() <= max_image {
-            return DebFileKind::Image(data); // move, no copy
-        } else {
-            return DebFileKind::Unsupported;
-        }
+        return if data.len() <= max_image { DebFileKind::Image } else { DebFileKind::Unsupported };
     }
 
-    // ---- Image by magic bytes ----------------------------------------------
-    if is_image_magic(&data) {
-        if data.len() <= max_image {
-            return DebFileKind::Image(data); // move, no copy
-        } else {
-            return DebFileKind::Unsupported;
-        }
+    if is_image_magic(data) {
+        return if data.len() <= max_image { DebFileKind::Image } else { DebFileKind::Unsupported };
     }
 
-    // ---- Too large for text preview ----------------------------------------
     if data.len() > max_text {
         return DebFileKind::Unsupported;
     }
 
-    // ---- Sniff for binary content: null bytes are a strong indicator --------
     let sniff_len = data.len().min(8192);
-    if data[..sniff_len].contains(&0u8) {
+    if sniff_len > 0 && data[..sniff_len].contains(&0u8) {
         return DebFileKind::Unsupported;
     }
 
-    // ---- Try to decode as UTF-8 (move into String, no extra copy) ----------
-    match String::from_utf8(data) {
-        Ok(text) => DebFileKind::Text(text),
-        Err(_) => DebFileKind::Unsupported,
+    if std::str::from_utf8(data).is_ok() {
+        DebFileKind::Text
+    } else {
+        DebFileKind::Unsupported
     }
 }
 
-/// Check extension before reading file content — avoids pulling large binaries into memory.
 fn is_known_binary_ext(path: &str) -> bool {
     const BINARY_EXTS: &[&str] = &[
         "so", "a", "o", "ko", "deb", "ar", "gz", "xz", "bz2", "zst", "lz4", "lzma",
@@ -180,25 +197,10 @@ fn is_image_magic(data: &[u8]) -> bool {
     if data.len() < 4 {
         return false;
     }
-    // PNG
-    if data.starts_with(b"\x89PNG") {
-        return true;
-    }
-    // JPEG
-    if data.starts_with(b"\xFF\xD8\xFF") {
-        return true;
-    }
-    // GIF
-    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        return true;
-    }
-    // BMP
-    if data.starts_with(b"BM") {
-        return true;
-    }
-    // WebP: "RIFF????WEBP"
-    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        return true;
-    }
+    if data.starts_with(b"\x89PNG") { return true; }
+    if data.starts_with(b"\xFF\xD8\xFF") { return true; }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") { return true; }
+    if data.starts_with(b"BM") { return true; }
+    if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" { return true; }
     false
 }

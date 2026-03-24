@@ -15,7 +15,7 @@ use gpui_component::{
 use std::path::PathBuf;
 
 use crate::i18n::tr;
-use crate::utils::deb_files::{DebFileEntry, DebFileKind, extract_previewable_files};
+use crate::utils::deb_files::{DebFileEntry, DebFileKind, ExtractedDeb, read_cached_file};
 
 // ---------------------------------------------------------------------------
 // State
@@ -24,7 +24,8 @@ use crate::utils::deb_files::{DebFileEntry, DebFileKind, extract_previewable_fil
 pub enum FilesLoadState {
     Idle,
     Loading,
-    Loaded(Vec<DebFileEntry>),
+    /// Holds the extracted metadata + temp directory (keeps cache alive).
+    Loaded(ExtractedDeb),
     Error,
 }
 
@@ -140,25 +141,26 @@ impl FilesPreviewView {
     /// Called when a leaf tree item is clicked.
     fn select_file(&mut self, entry_id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let entries = match &self.load_state {
-            FilesLoadState::Loaded(e) => e,
+            FilesLoadState::Loaded(extracted) => &extracted.entries,
             _ => return,
         };
 
         let found = entries.iter().find(|e| e.path == entry_id).cloned();
         let Some(file) = found else { return };
 
-        // Load text content into the editor
-        if let DebFileKind::Text(text) = &file.kind {
-            let lang = detect_language(entry_id);
-            let text = text.clone();
-            // Create a fresh InputState with the correct language
-            let new_editor = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .code_editor(lang)
-                    .line_number(true)
-                    .default_value(text)
-            });
-            self.editor_state = new_editor;
+        // Load text content from cache on demand
+        if matches!(file.kind, DebFileKind::Text) {
+            if let Some(bytes) = read_cached_file(&file) {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                let lang = detect_language(entry_id);
+                let new_editor = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .code_editor(lang)
+                        .line_number(true)
+                        .default_value(text)
+                });
+                self.editor_state = new_editor;
+            }
         }
 
         self.selected = Some(file);
@@ -168,7 +170,7 @@ impl FilesPreviewView {
     fn update_tree_filter(&mut self, cx: &mut Context<Self>) {
         let search_text = self.search_state.read(cx).text().to_string().to_lowercase();
         let entries = match &self.load_state {
-            FilesLoadState::Loaded(e) => e,
+            FilesLoadState::Loaded(extracted) => &extracted.entries,
             _ => return,
         };
 
@@ -323,7 +325,7 @@ impl FilesPreviewView {
                 .into_any_element(),
 
             Some(file) => match &file.kind {
-                DebFileKind::Text(_) => div()
+                DebFileKind::Text => div()
                     .flex_1()
                     .size_full()
                     .child(
@@ -335,7 +337,21 @@ impl FilesPreviewView {
                     )
                     .into_any_element(),
 
-                DebFileKind::Image(bytes) => render_image_preview(&file.path, bytes, cx),
+                DebFileKind::Image => {
+                    if let Some(bytes) = read_cached_file(file) {
+                        render_image_preview(&file.path, &bytes, cx)
+                    } else {
+                        let path = file.path.clone();
+                        v_flex()
+                            .flex_1()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .child(div().text_color(cx.theme().muted_foreground).child(tr("files_preview.unsupported_preview")))
+                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(path))
+                            .into_any_element()
+                    }
+                }
 
                 DebFileKind::Unsupported => {
                     let path = file.path.clone();
@@ -344,17 +360,8 @@ impl FilesPreviewView {
                         .items_center()
                         .justify_center()
                         .gap_2()
-                        .child(
-                            div()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr("files_preview.unsupported_preview")),
-                        )
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(path),
-                        )
+                        .child(div().text_color(cx.theme().muted_foreground).child(tr("files_preview.unsupported_preview")))
+                        .child(div().text_sm().text_color(cx.theme().muted_foreground).child(path))
                         .into_any_element()
                 }
             },
@@ -373,16 +380,18 @@ async fn load_files_async(
 ) {
     let result = cx
         .background_executor()
-        .spawn(async move { extract_previewable_files(&path) })
+        .spawn(async move {
+            crate::utils::deb_files::extract_previewable_files(&path)
+        })
         .await;
 
     match result {
-        Ok(entries) => {
+        Ok(extracted) => {
             let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
-            let count = entries.len();
+            let count = extracted.entries.len();
 
             weak.update(cx, |view, cx| {
-                view.load_state = FilesLoadState::Loaded(entries);
+                view.load_state = FilesLoadState::Loaded(extracted);
                 view.selected = None;
                 view.update_tree_filter(cx);
             })
