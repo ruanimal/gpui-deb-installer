@@ -3,6 +3,7 @@ mod i18n;
 mod models;
 mod utils;
 mod views;
+mod window_state;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -16,6 +17,7 @@ use std::path::PathBuf;
 use app::AppView;
 use i18n::{init_locale, tr};
 use utils::dpkg;
+use window_state::WindowState;
 
 fn main() {
     init_locale();
@@ -39,9 +41,10 @@ fn main() {
                 eprintln!("{}", tr("warning.pkexec_missing"));
             }
 
-            let bounds = Bounds::centered(None, size(px(700.), px(470.)), cx);
+            let ws = WindowState::load();
+            let bounds = Bounds::centered(None, size(px(ws.width), px(ws.height)), cx);
 
-            cx.open_window(
+            let _window = cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
@@ -54,6 +57,13 @@ fn main() {
                     ..Default::default()
                 },
                 |window, cx| {
+                    // Save window size when the user closes the window
+                    window.on_window_should_close(cx, |window, _cx| {
+                        let b = window.bounds();
+                        WindowState::save(f32::from(b.size.width), f32::from(b.size.height));
+                        true
+                    });
+
                     let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), cx));
                     let app_view: gpui::AnyView = app_view.into();
                     cx.new(|cx| Root::new(app_view, window, cx))
