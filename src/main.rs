@@ -39,7 +39,7 @@ fn main() {
                 eprintln!("{}", tr("warning.pkexec_missing"));
             }
 
-            let bounds = Bounds::centered(None, size(px(800.), px(600.)), cx);
+            let bounds = Bounds::centered(None, size(px(700.), px(470.)), cx);
 
             cx.open_window(
                 WindowOptions {

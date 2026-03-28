@@ -396,8 +396,10 @@ impl InstallView {
 
 impl Render for InstallView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_file_selected = matches!(self.state, InstallState::FileSelected { .. });
         v_flex()
-            .size_full()
+            .when(!is_file_selected, |el| el.size_full())
+            .when(is_file_selected, |el| el.w_full())
             .p_4()
             .gap_4()
             .child(match &self.state {
@@ -620,7 +622,6 @@ fn render_file_selected(
     };
 
     v_flex()
-        .flex_1()
         .gap_3()
         .child(
             v_flex()
