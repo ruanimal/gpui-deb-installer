@@ -3,7 +3,6 @@ mod i18n;
 mod models;
 mod utils;
 mod views;
-mod window_state;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
@@ -17,7 +16,7 @@ use std::path::PathBuf;
 use app::AppView;
 use i18n::{init_locale, tr};
 use utils::dpkg;
-use window_state::WindowState;
+use crate::models::config::AppConfig;
 
 fn main() {
     init_locale();
@@ -41,8 +40,9 @@ fn main() {
                 eprintln!("{}", tr("warning.pkexec_missing"));
             }
 
-            let ws = WindowState::load();
-            let bounds = Bounds::centered(None, size(px(ws.width), px(ws.height)), cx);
+            let config = AppConfig::load();
+            let bounds = Bounds::centered(None, size(px(config.width), px(config.height)), cx);
+            let initial_auto_close = config.auto_close;
 
             let _window = cx.open_window(
                 WindowOptions {
@@ -57,14 +57,18 @@ fn main() {
                     ..Default::default()
                 },
                 |window, cx| {
-                    // Save window size when the user closes the window
+                    // Save window size + settings when the user closes the window
                     window.on_window_should_close(cx, |window, _cx| {
                         let b = window.bounds();
-                        WindowState::save(f32::from(b.size.width), f32::from(b.size.height));
+                        // auto_close is saved immediately on toggle; only update size here
+                        let mut cfg = AppConfig::load();
+                        cfg.width = f32::from(b.size.width);
+                        cfg.height = f32::from(b.size.height);
+                        cfg.save();
                         true
                     });
 
-                    let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), cx));
+                    let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), initial_auto_close, cx));
                     let app_view: gpui::AnyView = app_view.into();
                     cx.new(|cx| Root::new(app_view, window, cx))
                 },

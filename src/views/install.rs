@@ -21,6 +21,7 @@ use crate::{
         package::{DebInfo, InstalledPackage},
     },
     utils::{deb_reader, dpkg},
+    models::config::AppConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ pub struct InstallView {
 }
 
 impl InstallView {
-    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, initial_auto_close: bool, cx: &mut Context<Self>) -> Self {
         let inputs = InfoInputs {
             name: cx.new(|cx| InputState::new(window, cx)),
             version: cx.new(|cx| InputState::new(window, cx)),
@@ -116,7 +117,7 @@ impl InstallView {
         let mut view = Self {
             state: InstallState::Idle,
             info_inputs: inputs,
-            auto_close: false,
+            auto_close: initial_auto_close,
             _subscriptions: subscriptions,
             on_installed: None,
             on_deb_loaded: None,
@@ -732,6 +733,9 @@ fn render_file_selected(
                         .checked(auto_close)
                         .on_click(cx.listener(|view, checked: &bool, _window, _cx| {
                             view.auto_close = *checked;
+                            let mut cfg = AppConfig::load();
+                            cfg.auto_close = *checked;
+                            cfg.save();
                         })),
                 ),
         )

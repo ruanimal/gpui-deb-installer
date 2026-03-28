@@ -22,9 +22,9 @@ pub struct AppView {
 }
 
 impl AppView {
-    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, initial_auto_close: bool, cx: &mut Context<Self>) -> Self {
         let packages_view = cx.new(|cx| PackagesView::new(window, cx));
-        let install_view = cx.new(|cx| InstallView::new(window, initial_deb_path, cx));
+        let install_view = cx.new(|cx| InstallView::new(window, initial_deb_path, initial_auto_close, cx));
         let files_preview_view = cx.new(|cx| FilesPreviewView::new(window, cx));
 
         // When a package is installed/uninstalled, reload the Installed list.
