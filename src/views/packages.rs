@@ -6,6 +6,7 @@ use gpui_component::{
     ActiveTheme, Size, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
+    scroll::ScrollableElement,
 };
 use std::sync::Arc;
 
@@ -164,7 +165,7 @@ impl Render for PackagesView {
                     .text_color(cx.theme().muted_foreground)
                     .font_weight(FontWeight::BOLD)
                     .child(div().w(gpui::px(200.)).child(tr("packages.header.package")))
-                    .child(div().w(gpui::px(120.)).child(tr("packages.header.version")))
+                    .child(div().w(gpui::px(160.)).child(tr("packages.header.version")))
                     .child(div().flex_1().child(tr("packages.header.installed_time")))
                     .child(div().w(gpui::px(100.)).child(tr("packages.header.action"))),
             )
@@ -180,27 +181,38 @@ impl Render for PackagesView {
                 )
             })
             // Data rows
-            .children(
-                rows.into_iter()
-                    .zip(uninstall_buttons.into_iter())
-                    .map(|(pkg, btn)| {
-                        h_flex()
-                            .gap_2()
-                            .px_3()
-                            .py_2()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().list)
-                            .child(div().w(gpui::px(200.)).child(pkg.name.clone()))
-                            .child(div().w(gpui::px(120.)).child(pkg.version.clone()))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(pkg.install_date.format("%Y-%m-%d %H:%M").to_string()),
-                            )
-                            .child(div().w(gpui::px(100.)).child(btn))
-                    }),
+            .child(
+                v_flex()
+                    .flex_1()
+                    .overflow_y_scrollbar()
+                    .gap_2()
+                    .children(
+                        rows.into_iter()
+                            .zip(uninstall_buttons.into_iter())
+                            .map(|(pkg, btn)| {
+                                h_flex()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_2()
+                                    .h(gpui::px(40.))
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(cx.theme().border)
+                                    .bg(cx.theme().list)
+                                    .child(div().w(gpui::px(200.)).overflow_hidden().truncate().child(pkg.name.clone()))
+                                    .child(div().w(gpui::px(160.)).overflow_hidden().truncate().child(pkg.version.clone()))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .truncate()
+                                            .child(pkg.install_date.format("%Y-%m-%d %H:%M").to_string()),
+                                    )
+                                    .child(div().w(gpui::px(100.)).flex_shrink_0().child(btn))
+                            }),
+                    )
             )
     }
 }
