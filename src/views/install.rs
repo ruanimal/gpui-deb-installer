@@ -1,8 +1,8 @@
 use chrono::Utc;
 use gpui::{
-    App, AppContext, AsyncWindowContext, Context, Entity, IntoElement, ParentElement,
-    PathPromptOptions, Render, Styled, Subscription, VisualContext, WeakEntity,
-    Window, div, prelude::FluentBuilder,
+    App, AppContext, AsyncWindowContext, Context, Entity, IntoElement, ListAlignment, ListState,
+    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, VisualContext,
+    WeakEntity, Window, div, list, prelude::FluentBuilder, px,
 };
 use gpui_component::{
     ActiveTheme,
@@ -10,7 +10,6 @@ use gpui_component::{
     checkbox::Checkbox,
     h_flex, v_flex,
     input::{Input, InputEvent, InputState},
-    text::TextView,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -37,9 +36,9 @@ pub enum InstallState {
         /// Version already installed on the system, if any.
         installed_version: Option<String>,
     },
-    Installing { info: DebInfo, log: String },
-    Uninstalling { pkg_name: String, log: String },
-    Done { message: String, success: bool, log: String },
+    Installing { info: DebInfo, log: Vec<String> },
+    Uninstalling { pkg_name: String, log: Vec<String> },
+    Done { message: String, success: bool, log: Vec<String> },
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +61,7 @@ pub struct InstallView {
     state: InstallState,
     info_inputs: InfoInputs,
     auto_close: bool,
+    log_list_state: ListState,
     _subscriptions: Vec<Subscription>,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -118,6 +118,7 @@ impl InstallView {
             state: InstallState::Idle,
             info_inputs: inputs,
             auto_close: initial_auto_close,
+            log_list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
             _subscriptions: subscriptions,
             on_installed: None,
             on_deb_loaded: None,
@@ -171,7 +172,7 @@ impl InstallView {
                             view.state = InstallState::Done {
                                 message: tr("install.selected_not_deb").into(),
                                 success: false,
-                                log: String::new(),
+                                log: Vec::new(),
                             };
                             cx.notify();
                         })
@@ -200,7 +201,8 @@ impl InstallView {
             _ => return,
         };
 
-        self.state = InstallState::Installing { info: info.clone(), log: String::new() };
+        self.state = InstallState::Installing { info: info.clone(), log: Vec::new() };
+        self.log_list_state.reset(0);
         cx.notify();
 
         let on_installed = self.on_installed.clone();
@@ -220,10 +222,10 @@ impl InstallView {
                 let l = line.clone();
                 weak.update(cx, |view, cx| {
                     if let InstallState::Installing { ref mut log, .. } = view.state {
-                        if !log.is_empty() {
-                            log.push('\n');
-                        }
-                        log.push_str(&l);
+                        log.push(l);
+                        let last = log.len().saturating_sub(1);
+                        view.log_list_state.splice(last..last, 1);
+                        view.log_list_state.scroll_to_reveal_item(last);
                     }
                     cx.notify();
                 })
@@ -234,7 +236,7 @@ impl InstallView {
             let final_log = weak
                 .read_with(cx, |view, _| match &view.state {
                     InstallState::Installing { log, .. } => log.clone(),
-                    _ => String::new(),
+                    _ => Vec::new(),
                 })
                 .unwrap_or_default();
 
@@ -262,7 +264,6 @@ impl InstallView {
                         cx.notify();
                     })
                     .ok();
-
                     if let Some(cb) = on_installed {
                         cx.update(|window, cx| cb(window, cx)).ok();
                     }
@@ -276,10 +277,12 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
+                        let mut log = final_log;
+                        log.push(e.to_string());
                         view.state = InstallState::Done {
                             message: tr("install.installation_failed"),
                             success: false,
-                            log: format!("{}\n{}", final_log, e),
+                            log,
                         };
                         cx.notify();
                     })
@@ -300,7 +303,8 @@ impl InstallView {
 
     /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
     pub fn start_uninstall_by_name(&mut self, pkg_name: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: String::new() };
+        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: Vec::new() };
+        self.log_list_state.reset(0);
         cx.notify();
 
         let on_installed = self.on_installed.clone();
@@ -317,10 +321,10 @@ impl InstallView {
                 let l = line.clone();
                 weak.update(cx, |view, cx| {
                     if let InstallState::Uninstalling { ref mut log, .. } = view.state {
-                        if !log.is_empty() {
-                            log.push('\n');
-                        }
-                        log.push_str(&l);
+                        log.push(l);
+                        let last = log.len().saturating_sub(1);
+                        view.log_list_state.splice(last..last, 1);
+                        view.log_list_state.scroll_to_reveal_item(last);
                     }
                     cx.notify();
                 })
@@ -330,7 +334,7 @@ impl InstallView {
             let final_log = weak
                 .read_with(cx, |view, _| match &view.state {
                     InstallState::Uninstalling { log, .. } => log.clone(),
-                    _ => String::new(),
+                    _ => Vec::new(),
                 })
                 .unwrap_or_default();
 
@@ -354,10 +358,12 @@ impl InstallView {
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
+                        let mut log = final_log;
+                        log.push(e.to_string());
                         view.state = InstallState::Done {
                             message: tr("install.uninstall_failed"),
                             success: false,
-                            log: format!("{}\n{}", final_log, e),
+                            log,
                         };
                         cx.notify();
                     })
@@ -417,25 +423,28 @@ impl Render for InstallView {
                     render_file_selected(path_s, info, iv, auto_close, inputs, cx)
                 }
                 InstallState::Installing { info, log } => {
+                    let list_state = self.log_list_state.clone();
                     render_with_log(
                         &rust_i18n::t!("install.installing", pkg = info.name.as_str()).to_string(),
                         log,
                         None,
-                        window,
+                        list_state,
                         cx,
                     )
                 }
                 InstallState::Uninstalling { pkg_name, log } => {
+                    let list_state = self.log_list_state.clone();
                     render_with_log(
                         &rust_i18n::t!("install.uninstalling", pkg = pkg_name.as_str()).to_string(),
                         log,
                         None,
-                        window,
+                        list_state,
                         cx,
                     )
                 }
                 InstallState::Done { message, success, log } => {
-                    render_with_log("", log, Some((*success, message.clone())), window, cx)
+                    let list_state = self.log_list_state.clone();
+                    render_with_log("", log, Some((*success, message.clone())), list_state, cx)
                 }
             })
     }
@@ -572,7 +581,7 @@ async fn load_deb_async(
                 view.state = InstallState::Done {
                     message: rust_i18n::t!("install.read_deb_failed", err = e.to_string()).to_string(),
                     success: false,
-                    log: String::new(),
+                    log: Vec::new(),
                 };
                 cx.notify();
             })
@@ -747,20 +756,22 @@ fn render_file_selected(
 /// - `done = Some((ok, msg))` → finished: swaps title for result banner, shows Back button
 fn render_with_log(
     title: &str,
-    log: &str,
+    log: &[String],
     done: Option<(bool, String)>,
-    window: &mut Window,
+    list_state: ListState,
     cx: &mut Context<InstallView>,
 ) -> gpui::AnyElement {
-    let log_text = if log.is_empty() {
-        tr("install.waiting_auth")
-    } else {
-        log.to_string()
-    };
     let is_done = done.is_some();
-    // Wrap in a fenced code block so the Markdown renderer preserves
-    // whitespace and uses monospace font without interpreting special chars.
-    let md_content = format!("```\n{}\n```\n", log_text);
+
+    // Build owned lines for the closure
+    let lines: Vec<SharedString> = if log.is_empty() {
+        vec![SharedString::from(tr("install.waiting_auth"))]
+    } else {
+        log.iter().map(|l| SharedString::from(l.clone())).collect()
+    };
+
+    let theme_fg = cx.theme().foreground;
+    let theme_muted = cx.theme().muted_foreground;
 
     v_flex()
         .flex_1()
@@ -779,12 +790,12 @@ fn render_with_log(
                     .into_any_element()
             }
             None => div()
-                .text_color(cx.theme().foreground)
+                .text_color(theme_fg)
                 .font_weight(gpui::FontWeight::BOLD)
                 .child(title.to_string())
                 .into_any_element(),
         })
-        // Log panel (always visible)
+        // Log panel
         .child(
             v_flex()
                 .flex_1()
@@ -806,9 +817,20 @@ fn render_with_log(
                 )
                 .child(
                     div().flex_1().overflow_hidden().child(
-                        TextView::markdown("install-log", md_content, window, cx)
-                            .scrollable(true)
-                            .selectable(true),
+                        list(list_state, move |ix, _window, _cx| {
+                            let line = lines.get(ix).cloned().unwrap_or_default();
+                            div()
+                                .px_3()
+                                .py(px(1.))
+                                .text_sm()
+                                .font_family("monospace")
+                                .text_color(if line.is_empty() { theme_muted } else { theme_fg })
+                                .child(line)
+                                .into_any_element()
+                        })
+                        .flex_1()
+                        .w_full()
+                        .h_full(),
                     ),
                 ),
         )

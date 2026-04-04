@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use std::io::{BufRead, BufReader};
+use std::io::{BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -16,7 +16,7 @@ pub fn check_pkexec() -> bool {
 /// apt-get handles dependency resolution automatically.
 pub fn install_deb_streaming(path: PathBuf, log_tx: async_channel::Sender<String>) -> Result<()> {
     let mut child = Command::new("pkexec")
-        .args(["apt-get", "install", "-y"])
+        .args(["stdbuf", "-oL", "-eL", "apt-get", "install", "-y"])
         .arg(&path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -35,7 +35,7 @@ pub fn install_deb_streaming(path: PathBuf, log_tx: async_channel::Sender<String
 /// Runs `pkexec apt remove --yes`, streams stdout+stderr, returns Ok/Err.
 pub fn remove_package_streaming(name: String, log_tx: async_channel::Sender<String>) -> Result<()> {
     let mut child = Command::new("pkexec")
-        .args(["apt", "remove", "--yes"])
+        .args(["stdbuf", "-oL", "-eL", "apt", "remove", "--yes"])
         .arg(&name)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -51,6 +51,31 @@ pub fn remove_package_streaming(name: String, log_tx: async_channel::Sender<Stri
     Ok(())
 }
 
+/// Reads from a stream and splits on both `\n` and `\r`, sending each non-empty
+/// segment as a separate line. When dpkg emits `\r`-terminated progress updates,
+/// each percentage step becomes its own line instead of all being jammed together.
+fn read_lines_cr_lf<R: Read>(reader: R, tx: &async_channel::Sender<String>) {
+    let mut buf = Vec::new();
+    for byte in BufReader::new(reader).bytes().flatten() {
+        if byte == b'\n' || byte == b'\r' {
+            if !buf.is_empty() {
+                let line = String::from_utf8_lossy(&buf).into_owned();
+                if tx.send_blocking(line).is_err() {
+                    return;
+                }
+                buf.clear();
+            }
+        } else {
+            buf.push(byte);
+        }
+    }
+    // flush any remaining content without a trailing newline
+    if !buf.is_empty() {
+        let line = String::from_utf8_lossy(&buf).into_owned();
+        tx.send_blocking(line).ok();
+    }
+}
+
 /// Spawns two threads to read stdout and stderr, sending each line to `log_tx`.
 /// Blocks until both threads finish (i.e. the child has closed its pipes).
 fn pipe_output_to_channel(
@@ -61,22 +86,14 @@ fn pipe_output_to_channel(
     let tx_out = log_tx.clone();
     let t_out = std::thread::spawn(move || {
         if let Some(out) = stdout {
-            for line in BufReader::new(out).lines().flatten() {
-                if tx_out.send_blocking(line).is_err() {
-                    break;
-                }
-            }
+            read_lines_cr_lf(out, &tx_out);
         }
     });
 
     let tx_err = log_tx.clone();
     let t_err = std::thread::spawn(move || {
         if let Some(err) = stderr {
-            for line in BufReader::new(err).lines().flatten() {
-                if tx_err.send_blocking(line).is_err() {
-                    break;
-                }
-            }
+            read_lines_cr_lf(err, &tx_err);
         }
     });
 
