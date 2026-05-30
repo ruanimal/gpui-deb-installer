@@ -1,6 +1,6 @@
 [package]
 name = "gpui-deb-installer"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "A graphical .deb package installer"
 
@@ -12,7 +12,7 @@ path = "src/main.rs"
 maintainer = "rlj"
 copyright = "2025, rlj"
 extended-description = "A graphical .deb package installer built with the gpui framework.\nSupports installing, reinstalling, upgrading, and removing .deb packages."
-depends = "$auto, policykit-1, dpkg, apt"
+depends = "$auto, policykit-1 | polkitd, dpkg, apt"
 section = "admin"
 priority = "optional"
 maintainer-scripts = "debian/"

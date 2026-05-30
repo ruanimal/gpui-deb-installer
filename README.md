@@ -57,5 +57,3 @@ cargo deb
 
 生成的安装包将位于 `target/debian/gpui-deb-installer_*.deb`。
 
-## Todo
-- [x] 包内文件预览, 使用dpkg --fsys-tarfile

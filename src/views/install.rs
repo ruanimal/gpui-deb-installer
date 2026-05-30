@@ -402,7 +402,7 @@ impl InstallView {
 // ---------------------------------------------------------------------------
 
 impl Render for InstallView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_file_selected = matches!(self.state, InstallState::FileSelected { .. });
         v_flex()
             .when(!is_file_selected, |el| el.size_full())
