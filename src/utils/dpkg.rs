@@ -12,11 +12,15 @@ pub fn check_pkexec() -> bool {
         .unwrap_or(false)
 }
 
-/// Runs `pkexec apt-get install -y <path>`, streams stdout+stderr line-by-line through `log_tx`.
+/// Runs `pkexec apt-get install -y --allow-downgrades <path>`, streams stdout+stderr line-by-line through `log_tx`.
 /// apt-get handles dependency resolution automatically.
+/// `--allow-downgrades` is required so users can install an older version of a package
+/// over a newer one already present on the system (apt otherwise refuses with an error).
 pub fn install_deb_streaming(path: PathBuf, log_tx: async_channel::Sender<String>) -> Result<()> {
     let mut child = Command::new("pkexec")
-        .args(["stdbuf", "-oL", "-eL", "apt-get", "install", "-y"])
+        .args([
+            "stdbuf", "-oL", "-eL", "apt-get", "install", "-y", "--allow-downgrades",
+        ])
         .arg(&path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
