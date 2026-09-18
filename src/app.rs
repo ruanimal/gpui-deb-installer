@@ -1,4 +1,4 @@
-use gpui_kit::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
+use gpui_kit::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, prelude::FluentBuilder};
 use std::{sync::Arc, path::PathBuf};
 use gpui_kit::component::{
     ActiveTheme,
@@ -19,6 +19,12 @@ pub struct AppView {
     install_view: Entity<InstallView>,
     packages_view: Entity<PackagesView>,
     files_preview_view: Entity<FilesPreviewView>,
+    /// Markdown shown on the Dependencies tab.
+    ///
+    /// Derived from `install_view`, so it is refreshed by the observation below
+    /// rather than recomputed on every render.
+    deps_markdown: String,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl AppView {
@@ -83,18 +89,32 @@ impl AppView {
             });
         }
 
+        // The Dependencies tab renders the install view's state, so refresh it
+        // whenever that state changes — including asynchronous transitions such
+        // as a .deb finishing its load while the tab is already open.
+        let deps_markdown = install_view.read(cx).deps_markdown();
+        let subscriptions = vec![cx.observe(&install_view, |this, install, cx| {
+            let markdown = install.read(cx).deps_markdown();
+            if markdown != this.deps_markdown {
+                this.deps_markdown = markdown;
+                cx.notify();
+            }
+        })];
+
         Self {
             active_tab: 0,
             install_view,
             packages_view,
             files_preview_view,
+            deps_markdown,
+            _subscriptions: subscriptions,
         }
     }
 }
 
 impl Render for AppView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let deps_md = self.install_view.read(cx).deps_markdown();
+        let deps_md = self.deps_markdown.clone();
 
         v_flex()
             .size_full()
