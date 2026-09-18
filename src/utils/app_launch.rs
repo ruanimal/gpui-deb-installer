@@ -3,15 +3,14 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// System-wide directories holding freedesktop application entries.
 const APPLICATIONS_DIRS: [&str; 2] = ["/usr/share/applications", "/usr/local/share/applications"];
 
-/// Commands that hand a `.desktop` entry to the desktop environment.
-///
-/// `open` is the alias some distributions (and `/etc/alternatives`) provide for
-/// `xdg-open`; `gio` is tried separately because it needs a subcommand.
-const OPENERS: [&str; 2] = ["open", "xdg-open"];
+/// How long a launcher may run before it is assumed to be waiting on the
+/// application it started.
+const OPENER_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The application a package exposes, as a freedesktop `.desktop` entry.
 ///
@@ -120,42 +119,71 @@ fn name_rank(name: &str, pkg: &str) -> u8 {
     }
 }
 
-/// Opens `target` through the system opener.
+/// Opens `target` by starting its desktop entry.
+///
+/// `gio launch` and `gtk-launch` are the commands that actually start an entry.
+/// The `open` family is deliberately not used: it hands a `.desktop` file to
+/// whatever is registered for `application/x-desktop` — often an editor or a
+/// terminal rather than a launcher — and can report success even when nothing
+/// was started.
 pub fn launch(target: &AppTarget) -> Result<()> {
     let path = target.path();
 
-    for opener in OPENERS {
-        if spawn_detached(Command::new(opener).arg(path)).is_ok() {
-            return Ok(());
+    let mut candidates = vec![{
+        let mut command = Command::new("gio");
+        command.arg("launch").arg(path);
+        command
+    }];
+
+    // `gtk-launch` takes the entry ID rather than the path.
+    if let Some(id) = desktop_id(path, &APPLICATIONS_DIRS) {
+        let mut command = Command::new("gtk-launch");
+        command.arg(id);
+        candidates.push(command);
+    }
+
+    let mut failures = Vec::new();
+    for mut command in candidates {
+        match run_opener(&mut command) {
+            Ok(()) => return Ok(()),
+            Err(err) => failures.push(err.to_string()),
         }
     }
 
-    if spawn_detached(Command::new("gio").arg("launch").arg(path)).is_ok() {
-        return Ok(());
-    }
-
-    // `gtk-launch` takes the entry ID rather than the path.
-    if let Some(id) = desktop_id(path, &APPLICATIONS_DIRS)
-        && spawn_detached(Command::new("gtk-launch").arg(&id)).is_ok()
-    {
-        return Ok(());
-    }
-
-    bail!("no application opener found (tried open, xdg-open, gio, gtk-launch)")
+    bail!("could not open {} ({})", path.display(), failures.join("; "))
 }
 
-/// Spawns a detached process, reaping it on a separate thread so it cannot
-/// become a zombie, and with its standard streams detached from this one.
-fn spawn_detached(command: &mut Command) -> Result<()> {
-    let child = command
+/// Runs an opener and waits for it to report success.
+///
+/// The launchers hand their standard streams to the application they start, so
+/// those must not be pipes: a pipe would stay open for as long as the
+/// application runs, and reading it would block.
+///
+/// A launcher that is still running after [`OPENER_TIMEOUT`] is assumed to be
+/// waiting on an application that did start; an immediate non-zero exit means
+/// the entry was not started, and the next candidate is tried.
+fn run_opener(command: &mut Command) -> Result<()> {
+    let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    reap(child);
-    Ok(())
+
+    let deadline = Instant::now() + OPENER_TIMEOUT;
+    loop {
+        match child.try_wait()? {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => bail!("{:?} exited with {}", command.get_program(), status),
+            None if Instant::now() >= deadline => {
+                reap(child);
+                return Ok(());
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    }
 }
 
+/// Waits on a detached child on its own thread so it cannot become a zombie.
 fn reap(mut child: Child) {
     std::thread::spawn(move || {
         let _ = child.wait();

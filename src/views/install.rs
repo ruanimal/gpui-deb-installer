@@ -419,16 +419,29 @@ impl InstallView {
     }
 
     /// Opens the application the installed package provides.
+    ///
+    /// The system launcher is waited on to see whether it worked, so it runs on
+    /// the background executor to keep the window responsive.
     fn open_installed_app(&mut self, target: &AppTarget, cx: &mut Context<Self>) {
-        let Err(err) = app_launch::launch(target) else {
-            return;
-        };
-        // No dedicated error surface on the Done screen, so report through the
-        // output panel the user is already looking at.
+        let target = target.clone();
+        cx.spawn(async move |weak, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { app_launch::launch(&target) })
+                .await;
+            let Err(err) = result else {
+                return;
+            };
+            weak.update(cx, |view, cx| view.report_open_failure(err.to_string(), cx))
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Reports a failed launch through the output panel the user is looking at.
+    fn report_open_failure(&mut self, message: String, cx: &mut Context<Self>) {
         if let InstallState::Done { log, .. } = &mut self.state {
-            log.push(
-                rust_i18n::t!("install.open_app_failed", err = err.to_string()).to_string(),
-            );
+            log.push(rust_i18n::t!("install.open_app_failed", err = message).to_string());
             let last = log.len().saturating_sub(1);
             self.log_list_state.splice(last..last, 1);
             self.log_list_state.scroll_to_reveal_item(last);
