@@ -1,12 +1,12 @@
 use chrono::Utc;
 use gpui_kit::{
-    App, AppContext, AsyncWindowContext, Context, Entity, IntoElement, ListAlignment, ListState,
-    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, VisualContext,
-    WeakEntity, Window, div, list, prelude::FluentBuilder, px,
+    App, AppContext, AsyncWindowContext, Context, Entity, Hsla, IntoElement, ListAlignment,
+    ListState, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription,
+    VisualContext, WeakEntity, Window, div, list, prelude::FluentBuilder, px, rgb,
 };
 use gpui_kit::component::{
     ActiveTheme,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex, v_flex,
     input::{Input, InputEvent, InputState},
@@ -821,6 +821,22 @@ fn render_file_selected(
         .into_any_element()
 }
 
+/// Accent blue of the "Open App" action, given as `#2590fc`.
+const OPEN_APP_BLUE: u32 = 0x2590fc;
+
+/// Button style painted in [`OPEN_APP_BLUE`].
+///
+/// The theme has no token for this exact hue, so the interaction shades are
+/// derived from it: lighter on hover, darker while pressed.
+fn open_app_button_variant(cx: &App) -> ButtonCustomVariant {
+    let base = Hsla::from(rgb(OPEN_APP_BLUE));
+    ButtonCustomVariant::new(cx)
+        .color(base)
+        .foreground(gpui_kit::white())
+        .hover(Hsla { l: (base.l + 0.07).min(1.0), ..base })
+        .active(Hsla { l: (base.l - 0.07).max(0.0), ..base })
+}
+
 /// Unified renderer for the in-progress and done states.
 /// - `done = None`            → in-progress: shows title + live log, no Back button
 /// - `done = Some((ok, msg))` → finished: swaps title for result banner, shows Back button
@@ -836,6 +852,7 @@ fn render_with_log(
     cx: &mut Context<InstallView>,
 ) -> gpui_kit::AnyElement {
     let is_done = done.is_some();
+    let open_app_variant = open_app_button_variant(cx);
 
     // Build owned lines for the closure
     let lines: Vec<SharedString> = if log.is_empty() {
@@ -866,7 +883,7 @@ fn render_with_log(
                     .when_some(open_target, |el, target| {
                         el.child(
                             Button::new("open-app-btn")
-                                .info()
+                                .custom(open_app_variant)
                                 .label(tr("install.action.open_app"))
                                 .on_click(cx.listener(move |view, _ev, _window, cx| {
                                     view.open_installed_app(&target, cx);
