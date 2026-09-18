@@ -15,7 +15,9 @@ use gpui_kit::component::{
 use std::path::PathBuf;
 
 use crate::i18n::tr;
-use crate::utils::deb_files::{DebFileEntry, DebFileKind, ExtractedDeb, read_cached_file};
+use crate::utils::deb_files::{
+    DebFileEntry, DebFileKind, ExtractedDeb, installed_path, read_cached_file,
+};
 
 // ---------------------------------------------------------------------------
 // State
@@ -136,6 +138,22 @@ impl FilesPreviewView {
             load_files_async(path, weak, cx).await;
         })
         .detach();
+    }
+
+    /// Installed paths of the `.desktop` entries the loaded .deb ships.
+    ///
+    /// The archive has already been parsed for the file tree, so the Install
+    /// tab reuses it to find an application to open after installing.
+    pub fn desktop_entries(&self) -> Vec<PathBuf> {
+        match &self.load_state {
+            FilesLoadState::Loaded(extracted) => extracted
+                .entries
+                .iter()
+                .filter(|entry| entry.path.ends_with(".desktop"))
+                .map(|entry| installed_path(&entry.path))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// Called when a leaf tree item is clicked.

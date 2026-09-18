@@ -47,6 +47,7 @@ install:
     uninstall: *uninstall
     cancel: *cancel
     back: "Back"
+    open_app: "Open App"
     auto_close: "Close after install"
   field:
     package: *package
@@ -57,6 +58,7 @@ install:
     installed_size: "Installed size"
     section: "Section"
   waiting_auth: "Waiting for pkexec authentication..."
+  open_app_failed: "Failed to open the application: %{err}"
   output: "Output"
 packages:
   uninstall: *uninstall

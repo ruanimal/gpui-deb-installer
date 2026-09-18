@@ -47,6 +47,7 @@ install:
     uninstall: *uninstall
     cancel: *cancel
     back: "返回"
+    open_app: "打开应用"
     auto_close: "安装后自动关闭"
   field:
     package: *package
@@ -57,6 +58,7 @@ install:
     installed_size: "安装大小"
     section: "分类"
   waiting_auth: "等待 pkexec 认证..."
+  open_app_failed: "打开应用失败: %{err}"
   output: "输出"
 packages:
   uninstall: *uninstall

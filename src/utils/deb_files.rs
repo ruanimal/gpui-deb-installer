@@ -132,6 +132,14 @@ pub fn read_cached_file(entry: &DebFileEntry) -> Option<Vec<u8>> {
     entry.cache_path.as_ref().and_then(|p| std::fs::read(p).ok())
 }
 
+/// The absolute path a `.deb` entry is installed to.
+///
+/// Archive members are stored relative to the filesystem root, usually with a
+/// leading `./`, which is not part of the installed path.
+pub fn installed_path(entry_path: &str) -> PathBuf {
+    PathBuf::from("/").join(entry_path.trim_start_matches("./"))
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -203,4 +211,20 @@ fn is_image_magic(data: &[u8]) -> bool {
     if data.starts_with(b"BM") { return true; }
     if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" { return true; }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entry_paths_map_to_their_installed_location() {
+        assert_eq!(
+            installed_path("./usr/share/applications/foo.desktop"),
+            PathBuf::from("/usr/share/applications/foo.desktop")
+        );
+        assert_eq!(installed_path("./usr/bin/foo"), PathBuf::from("/usr/bin/foo"));
+        // An already absolute member must not gain a second root.
+        assert_eq!(installed_path("/usr/bin/foo"), PathBuf::from("/usr/bin/foo"));
+    }
 }

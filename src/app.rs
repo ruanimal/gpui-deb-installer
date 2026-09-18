@@ -64,6 +64,20 @@ impl AppView {
             });
         }
 
+        // The Files tab parses the .deb, so let the Install tab ask it which
+        // application the package ships.
+        {
+            let files_weak = files_preview_view.downgrade();
+            install_view.update(cx, |view, _cx| {
+                view.desktop_entries = Some(Arc::new(move |cx: &App| {
+                    files_weak
+                        .upgrade()
+                        .map(|files| files.read(cx).desktop_entries())
+                        .unwrap_or_default()
+                }));
+            });
+        }
+
         // When the install_view loads a deb file, trigger the files preview.
         {
             let files_weak = files_preview_view.downgrade();

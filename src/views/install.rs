@@ -19,7 +19,7 @@ use crate::{
         db,
         package::{DebInfo, InstalledPackage},
     },
-    utils::{deb_reader, dpkg},
+    utils::{app_launch, app_launch::AppTarget, deb_reader, dpkg},
     models::config::AppConfig,
 };
 
@@ -62,6 +62,16 @@ pub struct InstallView {
     info_inputs: InfoInputs,
     auto_close: bool,
     log_list_state: ListState,
+    /// Application exposed by the package that was just installed, if any.
+    ///
+    /// Only set after a successful install, so the Done screen can offer to
+    /// open it.
+    open_target: Option<AppTarget>,
+    /// Supplies the `.desktop` entries of the loaded .deb, as installed paths.
+    ///
+    /// The Files tab already parses the archive, so the Done screen reuses that
+    /// rather than querying the package database again.
+    pub desktop_entries: Option<Arc<dyn Fn(&App) -> Vec<PathBuf> + 'static>>,
     _subscriptions: Vec<Subscription>,
     /// Called when a package is successfully installed/removed.
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -119,6 +129,8 @@ impl InstallView {
             info_inputs: inputs,
             auto_close: initial_auto_close,
             log_list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
+            open_target: None,
+            desktop_entries: None,
             _subscriptions: subscriptions,
             on_installed: None,
             on_deb_loaded: None,
@@ -202,6 +214,7 @@ impl InstallView {
         };
 
         self.state = InstallState::Installing { info: info.clone(), log: Vec::new() };
+        self.open_target = None;
         self.log_list_state.reset(0);
         cx.notify();
 
@@ -268,6 +281,27 @@ impl InstallView {
                         cx.update(|window, cx| cb(window, cx)).ok();
                     }
 
+                    // Look for the application the package ships, so the Done
+                    // screen can offer to open it. The Files tab has already
+                    // parsed the archive, so this stays in memory.
+                    let installed_pkg = info.name.clone();
+                    let open_target = weak
+                        .read_with(cx, |view, cx| {
+                            let entries = view
+                                .desktop_entries
+                                .as_ref()
+                                .map(|entries| entries(cx))
+                                .unwrap_or_default();
+                            app_launch::select_app_target(&entries, &installed_pkg)
+                        })
+                        .ok()
+                        .flatten();
+                    weak.update(cx, |view, cx| {
+                        view.open_target = open_target;
+                        cx.notify();
+                    })
+                    .ok();
+
                     if auto_close {
                         cx.background_executor()
                             .timer(std::time::Duration::from_secs(2))
@@ -304,6 +338,7 @@ impl InstallView {
     /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
     pub fn start_uninstall_by_name(&mut self, pkg_name: String, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: Vec::new() };
+        self.open_target = None;
         self.log_list_state.reset(0);
         cx.notify();
 
@@ -376,10 +411,29 @@ impl InstallView {
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
+        self.open_target = None;
         cx.notify();
         if let Some(cb) = self.on_reset.clone() {
             cb(window, cx);
         }
+    }
+
+    /// Opens the application the installed package provides.
+    fn open_installed_app(&mut self, target: &AppTarget, cx: &mut Context<Self>) {
+        let Err(err) = app_launch::launch(target) else {
+            return;
+        };
+        // No dedicated error surface on the Done screen, so report through the
+        // output panel the user is already looking at.
+        if let InstallState::Done { log, .. } = &mut self.state {
+            log.push(
+                rust_i18n::t!("install.open_app_failed", err = err.to_string()).to_string(),
+            );
+            let last = log.len().saturating_sub(1);
+            self.log_list_state.splice(last..last, 1);
+            self.log_list_state.scroll_to_reveal_item(last);
+        }
+        cx.notify();
     }
 
     /// Returns Markdown content for the Dependencies tab.
@@ -428,6 +482,7 @@ impl Render for InstallView {
                         &rust_i18n::t!("install.installing", pkg = info.name.as_str()).to_string(),
                         log,
                         None,
+                        None,
                         list_state,
                         cx,
                     )
@@ -438,13 +493,15 @@ impl Render for InstallView {
                         &rust_i18n::t!("install.uninstalling", pkg = pkg_name.as_str()).to_string(),
                         log,
                         None,
+                        None,
                         list_state,
                         cx,
                     )
                 }
                 InstallState::Done { message, success, log } => {
                     let list_state = self.log_list_state.clone();
-                    render_with_log("", log, Some((*success, message.clone())), list_state, cx)
+                    let open_target = self.open_target.clone();
+                    render_with_log("", log, Some((*success, message.clone())), open_target, list_state, cx)
                 }
             })
     }
@@ -754,10 +811,14 @@ fn render_file_selected(
 /// Unified renderer for the in-progress and done states.
 /// - `done = None`            → in-progress: shows title + live log, no Back button
 /// - `done = Some((ok, msg))` → finished: swaps title for result banner, shows Back button
+///
+/// `open_target` is only set after a successful install that exposed an
+/// application, and adds an "Open App" action to the result banner.
 fn render_with_log(
     title: &str,
     log: &[String],
     done: Option<(bool, String)>,
+    open_target: Option<AppTarget>,
     list_state: ListState,
     cx: &mut Context<InstallView>,
 ) -> gpui_kit::AnyElement {
@@ -783,10 +844,22 @@ fn render_with_log(
                 h_flex()
                     .px_4()
                     .py_3()
+                    .gap_3()
+                    .items_center()
                     .rounded_lg()
                     .border_1()
                     .border_color(border_color)
                     .child(div().flex_1().child(message))
+                    .when_some(open_target, |el, target| {
+                        el.child(
+                            Button::new("open-app-btn")
+                                .primary()
+                                .label(tr("install.action.open_app"))
+                                .on_click(cx.listener(move |view, _ev, _window, cx| {
+                                    view.open_installed_app(&target, cx);
+                                })),
+                        )
+                    })
                     .into_any_element()
             }
             None => div()
