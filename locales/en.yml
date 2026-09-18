@@ -80,3 +80,4 @@ files_preview:
   search_files: "Search %{count} files..."
   error: "Error: %{err}"
   render_image_failed: "Failed to render image: %{err}"
+  file_size: "Size: %{size}"

@@ -23,6 +23,8 @@ pub struct DebFileEntry {
     /// Full path as stored in the tar archive (e.g. `./usr/bin/foo`)
     pub path: String,
     pub kind: DebFileKind,
+    /// Uncompressed size of the member in bytes, as recorded in the tar header.
+    pub size: u64,
     /// Absolute path to the cached file on disk (None for Unsupported files
     /// that were not extracted).
     pub cache_path: Option<PathBuf>,
@@ -80,20 +82,21 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
         const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
         const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 
-        let file_size = header.size().unwrap_or(0) as usize;
+        let file_size = header.size().unwrap_or(0);
 
         // Skip known binary extensions or oversized files
-        if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES {
+        if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES as u64 {
             entries_out.push(DebFileEntry {
                 path: raw_path,
                 kind: DebFileKind::Unsupported,
+                size: file_size,
                 cache_path: None,
             });
             continue;
         }
 
         // Read content to classify
-        let mut buf = Vec::with_capacity(file_size);
+        let mut buf = Vec::with_capacity(file_size as usize);
         entry.read_to_end(&mut buf).unwrap_or_default();
 
         let kind = categorize(&raw_path, &buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
@@ -115,6 +118,7 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
         entries_out.push(DebFileEntry {
             path: raw_path,
             kind,
+            size: file_size,
             cache_path,
         });
     }
@@ -138,6 +142,31 @@ pub fn read_cached_file(entry: &DebFileEntry) -> Option<Vec<u8>> {
 /// leading `./`, which is not part of the installed path.
 pub fn installed_path(entry_path: &str) -> PathBuf {
     PathBuf::from("/").join(entry_path.trim_start_matches("./"))
+}
+
+/// Render a byte count as a short human-readable string (`0 B`, `1.5 KB`, ...).
+pub fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+
+    // One decimal is enough to distinguish adjacent sizes; drop a trailing
+    // `.0` so whole numbers stay tidy.
+    let rounded = (value * 10.0).round() / 10.0;
+    if (rounded.fract()).abs() < f64::EPSILON {
+        format!("{:.0} {}", rounded, UNITS[unit])
+    } else {
+        format!("{:.1} {}", rounded, UNITS[unit])
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -226,5 +255,15 @@ mod tests {
         assert_eq!(installed_path("./usr/bin/foo"), PathBuf::from("/usr/bin/foo"));
         // An already absolute member must not gain a second root.
         assert_eq!(installed_path("/usr/bin/foo"), PathBuf::from("/usr/bin/foo"));
+    }
+
+    #[test]
+    fn sizes_render_with_a_readable_unit() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(1024), "1 KB");
+        assert_eq!(format_size(1536), "1.5 KB");
+        assert_eq!(format_size(10 * 1024 * 1024), "10 MB");
+        assert_eq!(format_size(3 * 1024 * 1024 * 1024), "3 GB");
     }
 }

@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use crate::i18n::tr;
 use crate::utils::deb_files::{
-    DebFileEntry, DebFileKind, ExtractedDeb, installed_path, read_cached_file,
+    DebFileEntry, DebFileKind, ExtractedDeb, format_size, installed_path, read_cached_file,
 };
 
 // ---------------------------------------------------------------------------
@@ -333,57 +333,72 @@ impl Render for FilesPreviewView {
 
 impl FilesPreviewView {
     fn render_preview(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
-        match &self.selected {
-            None => v_flex()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr("files_preview.select_left"))
+        let file = match &self.selected {
+            None => {
+                return v_flex()
+                    .flex_1()
+                    .items_center()
+                    .justify_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr("files_preview.select_left"))
+                    .into_any_element();
+            }
+            Some(file) => file.clone(),
+        };
+
+        // The preview body fills the space left above the info bar.
+        let body: gpui_kit::AnyElement = match &file.kind {
+            DebFileKind::Text => Editor::new(&self.editor_state)
+                .h_full()
+                .disabled(true)
+                .appearance(false)
+                .bg(cx.theme().background)
                 .into_any_element(),
 
-            Some(file) => match &file.kind {
-                DebFileKind::Text => div()
-                    .flex_1()
-                    .size_full()
-                    .child(
-                        Editor::new(&self.editor_state)
-                            .h_full()
-                            .disabled(true)
-                            .appearance(false)
-                            .bg(cx.theme().background)
-                    )
-                    .into_any_element(),
-
-                DebFileKind::Image => {
-                    if let Some(bytes) = read_cached_file(file) {
-                        render_image_preview(&file.path, &bytes, cx)
-                    } else {
-                        let path = file.path.clone();
-                        v_flex()
-                            .flex_1()
-                            .items_center()
-                            .justify_center()
-                            .gap_2()
-                            .child(div().text_color(cx.theme().muted_foreground).child(tr("files_preview.unsupported_preview")))
-                            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(path))
-                            .into_any_element()
-                    }
-                }
-
-                DebFileKind::Unsupported => {
-                    let path = file.path.clone();
-                    v_flex()
-                        .flex_1()
-                        .items_center()
-                        .justify_center()
-                        .gap_2()
-                        .child(div().text_color(cx.theme().muted_foreground).child(tr("files_preview.unsupported_preview")))
-                        .child(div().text_sm().text_color(cx.theme().muted_foreground).child(path))
-                        .into_any_element()
-                }
+            DebFileKind::Image => match read_cached_file(&file) {
+                Some(bytes) => render_image_preview(&file.path, &bytes, cx),
+                None => render_preview_unavailable(&file.path, cx),
             },
-        }
+
+            DebFileKind::Unsupported => render_preview_unavailable(&file.path, cx),
+        };
+
+        v_flex()
+            .size_full()
+            .overflow_hidden()
+            .child(div().flex_1().min_h_0().overflow_hidden().child(body))
+            .child(Self::render_info_bar(&file, cx))
+            .into_any_element()
+    }
+
+    /// Status strip pinned to the bottom of the preview panel: the previewed
+    /// member's archive path on the left, its size on the right.
+    fn render_info_bar(file: &DebFileEntry, cx: &mut Context<Self>) -> impl IntoElement {
+        let size = SharedString::from(
+            rust_i18n::t!("files_preview.file_size", size = format_size(file.size)).to_string(),
+        );
+
+        h_flex()
+            .w_full()
+            .flex_shrink_0()
+            .items_center()
+            .justify_between()
+            .gap_4()
+            .px_3()
+            .py_1()
+            .bg(cx.theme().muted)
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(file.path.clone()),
+            )
+            .child(div().flex_shrink_0().child(size))
     }
 }
 
@@ -556,6 +571,29 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn render_preview_unavailable(
+    path: &str,
+    cx: &mut Context<FilesPreviewView>,
+) -> gpui_kit::AnyElement {
+    v_flex()
+        .size_full()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .child(
+            div()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr("files_preview.unsupported_preview")),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(path.to_string()),
+        )
+        .into_any_element()
+}
 
 fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreviewView>) -> gpui_kit::AnyElement {
     let ext = std::path::Path::new(path)

@@ -80,3 +80,4 @@ files_preview:
   search_files: "搜索 %{count} 个文件..."
   error: "错误: %{err}"
   render_image_failed: "无法渲染图片: %{err}"
+  file_size: "大小: %{size}"
