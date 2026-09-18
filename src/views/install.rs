@@ -866,7 +866,7 @@ fn render_with_log(
                     .when_some(open_target, |el, target| {
                         el.child(
                             Button::new("open-app-btn")
-                                .primary()
+                                .info()
                                 .label(tr("install.action.open_app"))
                                 .on_click(cx.listener(move |view, _ev, _window, cx| {
                                     view.open_installed_app(&target, cx);
