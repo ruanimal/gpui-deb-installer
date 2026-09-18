@@ -1,11 +1,11 @@
-use gpui::{
+use gpui_kit::{
     AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render,
     Styled, Subscription, VisualContext, WeakEntity, Window, div, img, px, SharedString,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme,
     h_flex, v_flex,
-    input::{Input, InputEvent, InputState},
+    input::{Editor, EditorState, Input, InputEvent, InputState},
     list::ListItem,
     menu::{ContextMenuExt, PopupMenuItem},
     resizable::{h_resizable, resizable_panel, ResizableState},
@@ -37,7 +37,7 @@ pub struct FilesPreviewView {
     /// Resizable panel state for the left/right split
     resizable_state: Entity<ResizableState>,
     /// Code editor for text file preview (recreated per selected file)
-    editor_state: Entity<InputState>,
+    editor_state: Entity<EditorState>,
     /// The currently selected file (None = nothing selected)
     selected: Option<DebFileEntry>,
     /// Search input state for filtering tree
@@ -53,10 +53,10 @@ impl FilesPreviewView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         let resizable_state = cx.new(|_cx| ResizableState::default());
-        // Create a default code-editor InputState; we recreate it on each file selection
+        // Create a default code-editor state; we recreate it on each file selection
         let editor_state = cx.new(|cx| {
-            InputState::new(window, cx)
-                .code_editor("text")
+            EditorState::new(window, cx)
+                .language("text")
                 .line_number(true)
         });
 
@@ -154,8 +154,8 @@ impl FilesPreviewView {
                 let text = String::from_utf8_lossy(&bytes).into_owned();
                 let lang = detect_language(entry_id);
                 let new_editor = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .code_editor(lang)
+                    EditorState::new(window, cx)
+                        .language(lang)
                         .line_number(true)
                         .default_value(text)
                 });
@@ -273,7 +273,7 @@ impl Render for FilesPreviewView {
                                                                 let path = path.clone();
                                                                 menu.item(
                                                                     PopupMenuItem::new(tr("files_preview.copy_path"))
-                                                                        .on_click(move |_: &gpui::ClickEvent, _window, cx| {
+                                                                        .on_click(move |_: &gpui_kit::ClickEvent, _window, cx| {
                                                                             cx.write_to_clipboard(
                                                                                 ClipboardItem::new_string(path.clone()),
                                                                             );
@@ -314,7 +314,7 @@ impl Render for FilesPreviewView {
 }
 
 impl FilesPreviewView {
-    fn render_preview(&mut self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_preview(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         match &self.selected {
             None => v_flex()
                 .flex_1()
@@ -329,7 +329,7 @@ impl FilesPreviewView {
                     .flex_1()
                     .size_full()
                     .child(
-                        Input::new(&self.editor_state)
+                        Editor::new(&self.editor_state)
                             .h_full()
                             .disabled(true)
                             .appearance(false)
@@ -539,7 +539,7 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreviewView>) -> gpui::AnyElement {
+fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreviewView>) -> gpui_kit::AnyElement {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -547,17 +547,17 @@ fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreview
         .to_lowercase();
 
     let format = match ext.as_str() {
-        "png" => gpui::ImageFormat::Png,
-        "jpg" | "jpeg" => gpui::ImageFormat::Jpeg,
-        "gif" => gpui::ImageFormat::Gif,
-        "webp" => gpui::ImageFormat::Webp,
-        "bmp" => gpui::ImageFormat::Bmp,
-        "svg" => gpui::ImageFormat::Svg,
-        "tif" | "tiff" => gpui::ImageFormat::Tiff,
-        _ => gpui::ImageFormat::Png, // fallback, let the decoder figure it out
+        "png" => gpui_kit::ImageFormat::Png,
+        "jpg" | "jpeg" => gpui_kit::ImageFormat::Jpeg,
+        "gif" => gpui_kit::ImageFormat::Gif,
+        "webp" => gpui_kit::ImageFormat::Webp,
+        "bmp" => gpui_kit::ImageFormat::Bmp,
+        "svg" => gpui_kit::ImageFormat::Svg,
+        "tif" | "tiff" => gpui_kit::ImageFormat::Tiff,
+        _ => gpui_kit::ImageFormat::Png, // fallback, let the decoder figure it out
     };
 
-    let image = std::sync::Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()));
+    let image = std::sync::Arc::new(gpui_kit::Image::from_bytes(format, bytes.to_vec()));
 
     div()
         .size_full()

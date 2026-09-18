@@ -6,11 +6,11 @@ mod views;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-use gpui::{
-    App, AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
+use gpui_kit::{
+    App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
 };
-use gpui_component::Root;
-use gpui_component_assets::Assets;
+use gpui_kit::assets::Assets;
+use gpui_kit::component::Root;
 use std::path::PathBuf;
 
 use app::AppView;
@@ -31,10 +31,10 @@ fn main() {
         }
     });
 
-    Application::new()
+    gpui_kit::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
 
             if !dpkg::check_pkexec() {
                 eprintln!("{}", tr("warning.pkexec_missing"));
@@ -69,7 +69,7 @@ fn main() {
                     });
 
                     let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), initial_auto_close, cx));
-                    let app_view: gpui::AnyView = app_view.into();
+                    let app_view: gpui_kit::AnyView = app_view.into();
                     cx.new(|cx| Root::new(app_view, window, cx))
                 },
             )

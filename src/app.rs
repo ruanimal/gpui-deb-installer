@@ -1,6 +1,6 @@
-use gpui::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
+use gpui_kit::{App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, prelude::FluentBuilder};
 use std::{sync::Arc, path::PathBuf};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme,
     tab::{Tab, TabBar},
     text::TextView,
@@ -93,7 +93,7 @@ impl AppView {
 }
 
 impl Render for AppView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let deps_md = self.install_view.read(cx).deps_markdown();
 
         v_flex()
@@ -121,7 +121,7 @@ impl Render for AppView {
                     .when(self.active_tab == 1, |el| {
                         el.child(
                             div().size_full().p_4().child(
-                                TextView::markdown("deps-view", deps_md, window, cx)
+                                TextView::markdown("deps-view", deps_md)
                                     .scrollable(true)
                                     .selectable(true),
                             ),

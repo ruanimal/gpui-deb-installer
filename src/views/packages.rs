@@ -1,8 +1,8 @@
-use gpui::{
+use gpui_kit::{
     App, Context, FontWeight, IntoElement, ParentElement, Render, Styled, WeakEntity, Window, div,
     prelude::FluentBuilder,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Size, Sizable,
     button::{Button, ButtonVariants as _},
     h_flex, v_flex,
@@ -109,7 +109,7 @@ impl Render for PackagesView {
                         .px_3()
                         .py_2()
                         .rounded_md()
-                        .bg(cx.theme().list)
+                        .bg(cx.theme().colors.list)
                         .border_1()
                         .border_color(cx.theme().border)
                         .text_color(cx.theme().muted_foreground)
@@ -164,10 +164,10 @@ impl Render for PackagesView {
                     .bg(cx.theme().tab_bar)
                     .text_color(cx.theme().muted_foreground)
                     .font_weight(FontWeight::BOLD)
-                    .child(div().w(gpui::px(200.)).child(tr("packages.header.package")))
-                    .child(div().w(gpui::px(160.)).child(tr("packages.header.version")))
+                    .child(div().w(gpui_kit::px(200.)).child(tr("packages.header.package")))
+                    .child(div().w(gpui_kit::px(160.)).child(tr("packages.header.version")))
                     .child(div().flex_1().child(tr("packages.header.installed_time")))
-                    .child(div().w(gpui::px(100.)).child(tr("packages.header.action"))),
+                    .child(div().w(gpui_kit::px(100.)).child(tr("packages.header.action"))),
             )
             // Empty state
             .when(rows_count == 0, |el| {
@@ -194,15 +194,15 @@ impl Render for PackagesView {
                                     .gap_2()
                                     .px_3()
                                     .py_2()
-                                    .h(gpui::px(40.))
+                                    .h(gpui_kit::px(40.))
                                     .flex_shrink_0()
                                     .items_center()
                                     .rounded_md()
                                     .border_1()
                                     .border_color(cx.theme().border)
-                                    .bg(cx.theme().list)
-                                    .child(div().w(gpui::px(200.)).overflow_hidden().truncate().child(pkg.name.clone()))
-                                    .child(div().w(gpui::px(160.)).overflow_hidden().truncate().child(pkg.version.clone()))
+                                    .bg(cx.theme().colors.list)
+                                    .child(div().w(gpui_kit::px(200.)).overflow_hidden().truncate().child(pkg.name.clone()))
+                                    .child(div().w(gpui_kit::px(160.)).overflow_hidden().truncate().child(pkg.version.clone()))
                                     .child(
                                         div()
                                             .flex_1()
@@ -210,7 +210,7 @@ impl Render for PackagesView {
                                             .truncate()
                                             .child(pkg.install_date.format("%Y-%m-%d %H:%M").to_string()),
                                     )
-                                    .child(div().w(gpui::px(100.)).flex_shrink_0().child(btn))
+                                    .child(div().w(gpui_kit::px(100.)).flex_shrink_0().child(btn))
                             }),
                     )
             )

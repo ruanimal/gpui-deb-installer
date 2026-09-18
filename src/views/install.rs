@@ -1,10 +1,10 @@
 use chrono::Utc;
-use gpui::{
+use gpui_kit::{
     App, AppContext, AsyncWindowContext, Context, Entity, IntoElement, ListAlignment, ListState,
     ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, VisualContext,
     WeakEntity, Window, div, list, prelude::FluentBuilder, px,
 };
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
@@ -454,7 +454,7 @@ impl Render for InstallView {
 // Sub-renderers
 // ---------------------------------------------------------------------------
 
-fn render_idle(cx: &mut Context<InstallView>) -> gpui::AnyElement {
+fn render_idle(cx: &mut Context<InstallView>) -> gpui_kit::AnyElement {
     v_flex()
         .flex_1()
         .items_center()
@@ -462,8 +462,8 @@ fn render_idle(cx: &mut Context<InstallView>) -> gpui::AnyElement {
         .gap_4()
         .child(
             div()
-                .w(gpui::px(340.))
-                .h(gpui::px(180.))
+                .w(gpui_kit::px(340.))
+                .h(gpui_kit::px(180.))
                 .border_2()
                 .border_dashed()
                 .border_color(cx.theme().border)
@@ -590,7 +590,7 @@ async fn load_deb_async(
     }
 }
 
-fn render_loading_info(path: String) -> gpui::AnyElement {
+fn render_loading_info(path: String) -> gpui_kit::AnyElement {
     v_flex()
         .flex_1()
         .items_center()
@@ -608,7 +608,7 @@ fn render_file_selected(
     auto_close: bool,
     inputs: &InfoInputs,
     cx: &mut Context<InstallView>,
-) -> gpui::AnyElement {
+) -> gpui_kit::AnyElement {
     // Determine install status label and button label
     let (status_text, status_color, install_label) = match &installed_version {
         None => (tr("install.status.not_installed"), None, tr("install.action.install")),
@@ -640,7 +640,7 @@ fn render_file_selected(
                 .rounded_lg()
                 .border_1()
                 .border_color(cx.theme().border)
-                .bg(cx.theme().list)
+                .bg(cx.theme().colors.list)
                 // Package name + version row (header — kept as bold display text)
                 .child(
                     h_flex()
@@ -649,7 +649,7 @@ fn render_file_selected(
                         .child(
                             div()
                                 .text_xl()
-                                .font_weight(gpui::FontWeight::BOLD)
+                                .font_weight(gpui_kit::FontWeight::BOLD)
                                 .child(info.name.clone()),
                         )
                         .child(
@@ -694,7 +694,7 @@ fn render_file_selected(
                                 .child(status_text),
                         ),
                 )
-                .child(div().h(gpui::px(1.)).bg(cx.theme().border))
+                .child(div().h(gpui_kit::px(1.)).bg(cx.theme().border))
                 // Selectable info rows
                 .child(info_row_input(tr("install.field.package"), &inputs.name, cx))
                 .child(info_row_input(tr("install.field.version"), &inputs.version, cx))
@@ -760,7 +760,7 @@ fn render_with_log(
     done: Option<(bool, String)>,
     list_state: ListState,
     cx: &mut Context<InstallView>,
-) -> gpui::AnyElement {
+) -> gpui_kit::AnyElement {
     let is_done = done.is_some();
 
     // Build owned lines for the closure
@@ -791,7 +791,7 @@ fn render_with_log(
             }
             None => div()
                 .text_color(theme_fg)
-                .font_weight(gpui::FontWeight::BOLD)
+                .font_weight(gpui_kit::FontWeight::BOLD)
                 .child(title.to_string())
                 .into_any_element(),
         })
@@ -861,7 +861,7 @@ fn info_row_input(
         .items_center()
         .child(
             div()
-                .w(gpui::px(130.))
+                .w(gpui_kit::px(130.))
                 .text_color(cx.theme().muted_foreground)
                 .flex_shrink_0()
                 .child(label),

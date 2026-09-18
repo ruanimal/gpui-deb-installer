@@ -1,7 +1,7 @@
 [package]
 name = "gpui-deb-installer"
 version = "0.3.4"
-edition = "2021"
+edition = "2024"
 description = "A graphical .deb package installer"
 
 [[bin]]
@@ -23,9 +23,7 @@ assets = [
 ]
 
 [dependencies]
-gpui = "0.2.2"
-gpui-component = "0.5.1"
-gpui-component-assets = "0.5.1"
+gpui-kit = "0.6.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
