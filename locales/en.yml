@@ -65,10 +65,18 @@ packages:
   remove_package_confirm: "Remove package '%{pkg}'?"
   yes_remove: "Yes, Remove"
   cancel: *cancel
+  search_placeholder: "Search name or version..."
+  refresh: "Refresh"
+  include_repository: "Show repo packages"
+  loading: "Reading installed packages..."
+  load_failed: "Failed to read installed packages: %{err}"
+  count: "Showing %{shown} / %{total} packages"
+  no_match: "No matching packages."
   header:
     package: *package
     version: *version
-    installed_time: *installed
+    installed_time: "Install Time"
+    updated_time: "Update Time"
     action: *action
   empty: "No packages installed yet."
 files_preview:

@@ -1,4 +1,3 @@
-use chrono::Utc;
 use gpui_kit::{
     App, AppContext, AsyncWindowContext, Context, Entity, Hsla, IntoElement, ListAlignment,
     ListState, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription,
@@ -15,12 +14,8 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     i18n::tr,
-    models::{
-        db,
-        package::{DebInfo, InstalledPackage},
-    },
+    models::{config::AppConfig, package::DebInfo},
     utils::{app_launch, app_launch::AppTarget, deb_reader, dpkg},
-    models::config::AppConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -257,16 +252,8 @@ impl InstallView {
 
             match result {
                 Ok(()) => {
-                    let pkg = InstalledPackage {
-                        name: info.name.clone(),
-                        version: info.version.clone(),
-                        architecture: info.architecture.clone(),
-                        description: info.description.lines().next().unwrap_or("").to_string(),
-                        install_date: Utc::now(),
-                        source_file: Some(path),
-                    };
-                    let _ = db::add_package(pkg);
-
+                    // The Installed tab re-reads `apt list` afterwards, so there
+                    // is no local record to update here.
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
@@ -377,7 +364,6 @@ impl InstallView {
 
             match result {
                 Ok(()) => {
-                    let _ = db::remove_package(&pkg_name);
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
                             message: rust_i18n::t!("install.package_uninstalled", pkg = pkg_name.as_str()).to_string(),

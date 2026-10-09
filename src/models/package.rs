@@ -1,6 +1,4 @@
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use chrono::{DateTime, Local};
 
 /// Parsed metadata from a .deb file (not persisted).
 #[derive(Debug, Clone)]
@@ -15,13 +13,14 @@ pub struct DebInfo {
     pub section: Option<String>,
 }
 
-/// A record of an installed package (persisted to JSON).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A package installed on the system, as reported by `apt list`.
+#[derive(Debug, Clone)]
 pub struct InstalledPackage {
     pub name: String,
     pub version: String,
     pub architecture: String,
-    pub description: String,
-    pub install_date: DateTime<Utc>,
-    pub source_file: Option<PathBuf>,
+    /// When the package was first installed, if the dpkg logs still know.
+    pub install_date: Option<DateTime<Local>>,
+    /// When it was last installed or upgraded, if known.
+    pub update_date: Option<DateTime<Local>>,
 }

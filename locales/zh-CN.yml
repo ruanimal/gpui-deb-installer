@@ -65,10 +65,18 @@ packages:
   remove_package_confirm: "删除软件包 '%{pkg}'?"
   yes_remove: "是，删除"
   cancel: *cancel
+  search_placeholder: "搜索包名或版本..."
+  refresh: "刷新"
+  include_repository: "显示软件源中的包"
+  loading: "正在读取已安装软件包..."
+  load_failed: "读取已安装软件包失败: %{err}"
+  count: "显示 %{shown} / %{total} 个软件包"
+  no_match: "没有匹配的软件包。"
   header:
     package: *package
     version: *version
     installed_time: "安装时间"
+    updated_time: "更新时间"
     action: *action
   empty: "暂无已安装软件包。"
 files_preview:
