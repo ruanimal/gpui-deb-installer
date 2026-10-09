@@ -304,7 +304,7 @@ impl InstallView {
 
                     if auto_close {
                         cx.background_executor()
-                            .timer(std::time::Duration::from_secs(2))
+                            .timer(std::time::Duration::from_secs(10))
                             .await;
                         cx.update(|_window, cx| cx.quit()).ok();
                     }
