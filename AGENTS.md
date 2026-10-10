@@ -27,6 +27,7 @@ cargo deb                           # 打 .deb 包 → target/debian/*.deb
 - **一切 UI 文案走 i18n**：硬编码字符串用 `tr("a.b.c")`，同时在 `locales/en.yml` **和** `locales/zh-CN.yml` 添加同名 key（key 结构保持一致）。新增文件后无需改 `build.rs`，但改了 `locales/` 会触发重编译。
 - **系统操作用 `pkexec`**，不要用 `sudo`；安装走 `apt-get install -y --allow-downgrades`（允许降级），日志通过 `async_channel` 流式回传 UI。
 - **视图之间不要直接互相调用**，用 `app.rs` 里已有的回调钩子（`on_installed`、`on_tab_switch`、`install_view` 弱引用）来解耦。
+- **已安装列表的数据源就是 `apt list`**（见 `utils/apt.rs`），不要再引入本地安装记录（原 `models/db.rs` 已在 71d45e0 删除）；时间为空是正常情况，`utils/pkg_time.rs` 只能尽力从 `dpkg.log` 与 dpkg info 文件推断。
 - 只用 `gpui_kit` 导出的组件与 API；`cargo fmt` 风格、`use` 分组不强制，跟随所在文件现状。
 - 注释与文档用英文，提交信息与界面文案用中文。
 - 文档是双语的：`README.md`（英文，GitHub 默认展示）与 `README.zh-CN.md`，改动功能时**两份同步更新**，并保留各自顶部的语言切换链接。
