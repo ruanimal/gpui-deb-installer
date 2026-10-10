@@ -29,6 +29,7 @@ cargo deb                           # 打 .deb 包 → target/debian/*.deb
 - **视图之间不要直接互相调用**，用 `app.rs` 里已有的回调钩子（`on_installed`、`on_tab_switch`、`install_view` 弱引用）来解耦。
 - 只用 `gpui_kit` 导出的组件与 API；`cargo fmt` 风格、`use` 分组不强制，跟随所在文件现状。
 - 注释与文档用英文，提交信息与界面文案用中文。
+- 文档是双语的：`README.md`（英文，GitHub 默认展示）与 `README.zh-CN.md`，改动功能时**两份同步更新**，并保留各自顶部的语言切换链接。
 
 ## 提交与发布
 

@@ -1,59 +1,60 @@
 # GPUI DEB Installer 📦
 
-一个使用 [GPUI](https://www.gpui.rs/) 框架编写的高性能、轻量级图形化 `.deb` 软件包安装器。
+[中文](README.zh-CN.md) | **English**
+
+A fast, lightweight graphical installer for `.deb` packages, built with the [GPUI](https://www.gpui.rs/) framework.
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)
 
-## 特性 ✨
+## Features ✨
 
-- **快速流畅**：基于 GPU 加速的 GPUI 渲染引擎，响应极其迅速。
-- **全面信息展示**：支持查看包名、版本、描述、维护者、安装大小、依赖等元数据。
-- **已安装管理**：记录通过安装器安装的软件。
-- **文件预览**：预览 `.deb` 包内文件。
-- **系统集成**：支持通过命令行参数启动，可直接在文件管理器中右键打开 `.deb` 文件。
-- **权限安全**：使用 `pkexec` 调用系统软件包管理器，确保操作安全受控。
+- **Fast and fluid** — GPU-accelerated rendering via GPUI keeps the UI instantly responsive.
+- **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
+- **Installed package management** — browse, search and sort installed packages, with install/update times.
+- **File preview** — inspect the contents of a `.deb` before installing it.
+- **Desktop integration** — accepts a package path as a command-line argument, so a `.deb` can be opened straight from the file manager's context menu.
+- **Safe privileges** — installs and removals run through `pkexec`, keeping every operation under PolicyKit control.
 
-## 系统要求 🛠️
+## Requirements 🛠️
 
-- **操作系统**：Linux (Ubuntu, Debian, Deepin, UOS 等基于 Debian 的发行版)
-- **核心依赖**：`dpkg`, `apt`, `policykit-1` (pkexec)
-- **编译依赖**：Rust 工具链, `libvulkan-dev`, `libssl-dev`, `pkg-config`, `libwayland-dev` (如果您在 Wayland 下)
+- **OS**: Linux (Debian-based distributions such as Ubuntu, Debian, Deepin, UOS)
+- **Runtime**: `dpkg`, `apt`, `policykit-1` (`pkexec`)
+- **Build**: Rust toolchain, `libvulkan-dev`, `libssl-dev`, `pkg-config`, `libwayland-dev` (when running under Wayland)
 
-## 快速开始 🚀
+## Quick Start 🚀
 
-### 1. 编译与运行
+### 1. Build and run
 
-首先确保您已安装 Rust。
+Make sure Rust is installed first.
 
 ```bash
-# 运行 (不加载文件)
+# Run without loading a file
 cargo run --release
 
-# 运行 (加载指定 deb 文件)
+# Run with a specific deb file
 cargo run --release /path/to/your/package.deb
 ```
 
-### 2. 桌面环境集成 (开发模式)
+### 2. Desktop integration (development)
 
-本工作区提供了一个 `install-icon.sh` 脚本，可将应用右键菜单和图标集成到您的本地桌面系统中，而无需安装到 `/usr/bin`。
+This workspace ships an `install-icon.sh` script that registers the context-menu entry and icon in your local desktop environment, without installing anything into `/usr/bin`.
 
 ```bash
 chmod +x install-icon.sh
 ./install-icon.sh
 ```
 
-集成后，您可以直接在文件管理器（如 Nautilus, Thunar 或 Dolphin）中**右键点击 `.deb` 文件**并选择 **"DEB Installer"**。
+After that you can **right-click a `.deb` file** in your file manager (Nautilus, Thunar, Dolphin, …) and choose **"DEB Installer"**.
 
-### 3. 构建发布 DEB 包
+### 3. Build a release DEB package
 
 ```bash
-# 安装 cargo-deb
+# Install cargo-deb
 cargo install cargo-deb
 
-# 构建 .deb 包
+# Build the .deb package
 cargo deb
 ```
 
-生成的安装包将位于 `target/debian/gpui-deb-installer_*.deb`。
-
+The generated package is written to `target/debian/gpui-deb-installer_*.deb`.
