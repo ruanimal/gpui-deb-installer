@@ -131,6 +131,55 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
     })
 }
 
+/// Collect menu categories from application entries shipped in the archive.
+/// Read the cached package contents, never an already installed desktop file.
+pub fn desktop_categories(entries: &[DebFileEntry]) -> Vec<String> {
+    let mut desktop_entries: Vec<_> = entries.iter().filter(|entry| {
+        let path = installed_path(&entry.path);
+        path.extension().and_then(|ext| ext.to_str()) == Some("desktop")
+            && ["/usr/share/applications", "/usr/local/share/applications"]
+                .iter().any(|dir| path.starts_with(dir))
+    }).collect();
+    desktop_entries.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let mut categories = Vec::new();
+    for entry in desktop_entries {
+        let Some(data) = read_cached_file(entry) else { continue };
+        let Ok(text) = std::str::from_utf8(&data) else { continue };
+        for category in parse_desktop_categories(text) {
+            if !categories.contains(&category) {
+                categories.push(category);
+            }
+        }
+    }
+    categories
+}
+
+fn parse_desktop_categories(text: &str) -> Vec<String> {
+    let mut in_entry = false;
+    let mut is_application = false;
+    let mut hidden = false;
+    let mut categories = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_entry || line.starts_with('#') { continue; }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.trim();
+        match key.trim() {
+            "Type" => is_application = value == "Application",
+            "Hidden" | "NoDisplay" => hidden |= value == "true",
+            "Categories" => categories = value.split(';')
+                .map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect(),
+            _ => {}
+        }
+    }
+    if is_application && !hidden { categories } else { Vec::new() }
+}
+
 /// Read file content from the cache on demand.
 pub fn read_cached_file(entry: &DebFileEntry) -> Option<Vec<u8>> {
     entry.cache_path.as_ref().and_then(|p| std::fs::read(p).ok())
@@ -245,6 +294,42 @@ fn is_image_magic(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn categories_come_only_from_the_application_group() {
+        let text = "# Categories=Wrong;\n[Desktop Entry]\nType=Application\nCategories = Utility;Development;;\n[Desktop Action NewWindow]\nCategories=Wrong;\n";
+        assert_eq!(parse_desktop_categories(text), vec!["Utility", "Development"]);
+        for text in [
+            "[Desktop Entry]\nType=Application\nHidden=true\nCategories=Utility;\n",
+            "[Desktop Entry]\nType=Application\nNoDisplay=true\nCategories=Utility;\n",
+            "[Desktop Entry]\nType=Directory\nCategories=Utility;\n",
+            "[Desktop Entry]\nType=Application\n",
+        ] {
+            assert!(parse_desktop_categories(text).is_empty());
+        }
+    }
+
+    #[test]
+    fn package_categories_use_cached_application_entries_and_deduplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut entries = Vec::new();
+        for (i, (path, categories)) in [
+            ("./usr/share/applications/chatgpt.desktop", "Utility;Development;"),
+            ("./usr/local/share/applications/helper.desktop", "Utility;Network;"),
+            ("./usr/share/doc/example.desktop", "Wrong;"),
+        ].iter().enumerate() {
+            let cached = tmp.path().join(format!("{i}.desktop"));
+            std::fs::write(&cached, format!("[Desktop Entry]\nType=Application\nCategories={categories}\n")).unwrap();
+            entries.push(DebFileEntry {
+                path: path.to_string(), kind: DebFileKind::Text, size: 0, cache_path: Some(cached),
+            });
+        }
+        let categories = desktop_categories(&entries);
+        assert_eq!(categories, vec!["Utility", "Network", "Development"]);
+        entries.reverse();
+        assert_eq!(desktop_categories(&entries), categories);
+        assert!(desktop_categories(&[]).is_empty());
+    }
 
     #[test]
     fn entry_paths_map_to_their_installed_location() {

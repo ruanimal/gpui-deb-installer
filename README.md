@@ -11,6 +11,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with the [GPU
 
 - **Fast and fluid** — GPU-accelerated rendering via GPUI keeps the UI instantly responsive.
 - **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
+- **Distinct categories** — package section (`Section`) and desktop app categories (`Categories`) are shown separately. App categories come from visible application entries inside the selected `.deb`; multiple entries are merged and deduplicated, and missing categories are shown as unknown.
 - **Installed package management** — every package `dpkg` knows about, with search, sortable columns and install/update times.
 - **File preview** — inspect the contents of a `.deb` before installing it.
 - **Desktop integration** — accepts a package path as a command-line argument, so a `.deb` can be opened straight from the file manager's context menu.

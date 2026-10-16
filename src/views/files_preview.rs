@@ -1,5 +1,5 @@
 use gpui_kit::{
-    AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render,
+    App, AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render,
     Styled, Subscription, VisualContext, WeakEntity, Window, div, img, px, SharedString,
 };
 use gpui_kit::component::{
@@ -12,7 +12,7 @@ use gpui_kit::component::{
     tree::{TreeItem, TreeState, tree},
     IconName,
 };
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use crate::i18n::tr;
 use crate::utils::deb_files::{
@@ -45,6 +45,8 @@ pub struct FilesPreviewView {
     /// Search input state for filtering tree
     search_state: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
+    /// Reports categories through AppView after the archive has been read.
+    pub on_categories_loaded: Option<Arc<dyn Fn(PathBuf, Vec<String>, &mut Window, &mut App)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +78,7 @@ impl FilesPreviewView {
             selected: None,
             search_state: search_state.clone(),
             _subscriptions: Vec::new(),
+            on_categories_loaded: None,
         };
 
         view._subscriptions.push(cx.subscribe(
@@ -411,15 +414,29 @@ async fn load_files_async(
     weak: WeakEntity<FilesPreviewView>,
     cx: &mut AsyncWindowContext,
 ) {
+    let loaded_path = path.clone();
     let result = cx
         .background_executor()
         .spawn(async move {
-            crate::utils::deb_files::extract_previewable_files(&path)
+            let extracted = crate::utils::deb_files::extract_previewable_files(&path)?;
+            let categories = crate::utils::deb_files::desktop_categories(&extracted.entries);
+            Ok::<_, anyhow::Error>((extracted, categories))
         })
         .await;
 
+    // Ignore a completion after reset or selection of a different package.
+    let is_current = weak.read_with(cx, |view, _| {
+        view.last_loaded_path.as_ref() == Some(&loaded_path)
+    }).unwrap_or(false);
+    if !is_current { return; }
+    let callback = weak.read_with(cx, |view, _| view.on_categories_loaded.clone()).ok().flatten();
+    let categories = result.as_ref().map(|(_, categories)| categories.clone()).unwrap_or_default();
+    if let Some(callback) = callback {
+        cx.update(|window, cx| callback(loaded_path, categories, window, cx)).ok();
+    }
+
     match result {
-        Ok(extracted) => {
+        Ok((extracted, _)) => {
             let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
             let count = extracted.entries.len();
 

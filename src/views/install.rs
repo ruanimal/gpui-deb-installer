@@ -50,6 +50,7 @@ struct InfoInputs {
     maintainer: Entity<InputState>,
     size: Entity<InputState>,
     section: Entity<InputState>,
+    categories: Entity<InputState>,
 }
 
 pub struct InstallView {
@@ -77,6 +78,15 @@ pub struct InstallView {
 }
 
 impl InstallView {
+    /// Updates menu categories only for the package still being displayed.
+    pub fn set_desktop_categories(&mut self, path: &std::path::Path, categories: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(&self.state, InstallState::FileSelected { path: current, .. } if current == path) {
+            return;
+        }
+        let value = if categories.is_empty() { tr("install.unknown") } else { categories.join("; ") };
+        self.info_inputs.categories.update(cx, |s, cx| s.set_value(value, window, cx));
+    }
+
     pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, initial_auto_close: bool, cx: &mut Context<Self>) -> Self {
         let inputs = InfoInputs {
             name: cx.new(|cx| InputState::new(window, cx)),
@@ -86,6 +96,7 @@ impl InstallView {
             maintainer: cx.new(|cx| InputState::new(window, cx)),
             size: cx.new(|cx| InputState::new(window, cx)),
             section: cx.new(|cx| InputState::new(window, cx)),
+            categories: cx.new(|cx| InputState::new(window, cx)),
         };
 
         // When any one input gains focus, unselect all the others.
@@ -97,6 +108,7 @@ impl InstallView {
             inputs.maintainer.clone(),
             inputs.size.clone(),
             inputs.section.clone(),
+            inputs.categories.clone(),
         ];
         let mut subscriptions = Vec::new();
         for (i, focused) in all.iter().enumerate() {
@@ -573,6 +585,7 @@ async fn load_deb_async(
                         view.info_inputs.maintainer.clone(),
                         view.info_inputs.size.clone(),
                         view.info_inputs.section.clone(),
+                        view.info_inputs.categories.clone(),
                     )
                 })
                 .ok();
@@ -610,7 +623,7 @@ async fn load_deb_async(
             }
 
             // Populate the selectable input fields
-            if let Some((ne, ve, pe, de, me, se, ste)) = entities {
+            if let Some((ne, ve, pe, de, me, se, ste, ce)) = entities {
                 let name_v = info.name.clone();
                 let ver_v = format!("v{} ({})", info.version, info.architecture);
                 let path_v = path_str;
@@ -621,7 +634,7 @@ async fn load_deb_async(
                 } else {
                     tr("install.unknown")
                 };
-                let sect_v = info.section.clone().unwrap_or_default();
+                let sect_v = info.section.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| tr("install.unknown"));
 
                 cx.update_window_entity(&ne, |s, w, cx| s.set_value(name_v, w, cx)).ok();
                 cx.update_window_entity(&ve, |s, w, cx| s.set_value(ver_v, w, cx)).ok();
@@ -630,6 +643,7 @@ async fn load_deb_async(
                 cx.update_window_entity(&me, |s, w, cx| s.set_value(maint_v, w, cx)).ok();
                 cx.update_window_entity(&se, |s, w, cx| s.set_value(size_v, w, cx)).ok();
                 cx.update_window_entity(&ste, |s, w, cx| s.set_value(sect_v, w, cx)).ok();
+                cx.update_window_entity(&ce, |s, w, cx| s.set_value(tr("files_preview.loading"), w, cx)).ok();
             }
         }
         Err(e) => {
@@ -758,7 +772,8 @@ fn render_file_selected(
                 .child(info_row_input(tr("install.field.description"), &inputs.description, cx))
                 .child(info_row_input(tr("install.field.maintainer"), &inputs.maintainer, cx))
                 .child(info_row_input(tr("install.field.installed_size"), &inputs.size, cx))
-                .child(info_row_input(tr("install.field.section"), &inputs.section, cx)),
+                .child(info_row_input(tr("install.field.section"), &inputs.section, cx))
+                .child(info_row_input(tr("install.field.categories"), &inputs.categories, cx)),
         )
         .child(
             h_flex()

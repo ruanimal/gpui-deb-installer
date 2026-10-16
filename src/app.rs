@@ -91,6 +91,18 @@ impl AppView {
             });
         }
 
+        // Reuse the Files tab's extraction to display desktop menu categories.
+        {
+            let install_weak = install_view.downgrade();
+            files_preview_view.update(cx, |view, _| {
+                view.on_categories_loaded = Some(Arc::new(move |path, categories, window, cx| {
+                    install_weak.update(cx, |view, cx| {
+                        view.set_desktop_categories(&path, categories, window, cx);
+                    }).ok();
+                }));
+            });
+        }
+
         // When the install_view resets, clear the files preview.
         {
             let files_weak = files_preview_view.downgrade();
