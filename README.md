@@ -13,7 +13,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 - **Fast and fluid** — GPU-accelerated rendering via GPUI keeps the UI instantly responsive.
 - **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
 - **Distinct categories** — package section (`Section`) and desktop app categories (`Categories`) are shown separately. App categories come from visible application entries inside the selected `.deb`; multiple entries are merged and deduplicated, and missing categories are shown as unknown.
-- **Installed package management** — every package `dpkg` knows about, with search, sortable columns and install/update times.
+- **Installed package management** — every package `dpkg` knows about, with search, sortable columns, install/update times and batch uninstall.
 - **File preview** — inspect the contents of a `.deb` before installing it.
 - **Desktop integration** — accepts a package path as a command-line argument, so a `.deb` can be opened straight from the file manager's context menu.
 - **Safe privileges** — installs and removals run through `pkexec`, keeping every operation under PolicyKit control.
@@ -25,6 +25,7 @@ The Installed tab reads `apt list` directly — the app no longer keeps its own 
 
 - By default only packages that were installed locally (or that have vanished from every configured repository) are listed, via the `?installed ?obsolete` pattern. Turn on **Show repo packages** to list everything installed.
 - Search by package name or version; click a column header to sort; drag column borders to resize (all spare width goes to the package name); long lists scroll virtually.
+- Search, repository filtering, package counts and batch actions share a toolbar above the table. Select individual packages with the row checkboxes, or select all filtered packages with the checkbox in the package column header, then click **Uninstall selected**. Selections persist across searches and sorting, including packages hidden by the current filter; **Clear selection** clears them all. Refreshing or changing the repository toggle clears the selection. A centered confirmation dialog shows the package list and optional configuration cleanup before one `pkexec` authorization submits the batch to apt. The installed list refreshes after every removal attempt, including failures that may have removed some packages.
 - Install and update times are parsed from `dpkg.log`, including rotated `.gz` logs. For packages whose log entries are already gone, the mtime of `/var/lib/dpkg/info/<pkg>.list` is used as a fallback, so a time may be missing.
 
 ## Requirements 🛠️

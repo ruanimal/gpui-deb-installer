@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, Icon, Sizable, Size,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme, Disableable, Icon, Sizable, Size, WindowExt,
+    button::{Button, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -9,10 +9,11 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    App, AppContext, Context, Edges, Entity, IntoElement, ParentElement, Render, Styled,
-    Subscription, WeakEntity, Window, div, prelude::FluentBuilder, px,
+    App, AppContext, Context, Edges, Entity, InteractiveElement, IntoElement, ParentElement,
+    Render, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
+    prelude::FluentBuilder, px,
 };
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use super::ui;
 use crate::i18n::tr;
@@ -58,6 +59,8 @@ pub struct PackagesTableDelegate {
     all: Vec<InstalledPackage>,
     /// `all` after the search filter and sort order — the rendered rows.
     visible: Vec<InstalledPackage>,
+    /// Architecture-qualified names, independent of filtering and row order.
+    selected: BTreeSet<String>,
     /// Lower-cased search text.
     query: String,
     sort_key: SortKey,
@@ -75,6 +78,7 @@ impl PackagesTableDelegate {
         Self {
             all: Vec::new(),
             visible: Vec::new(),
+            selected: BTreeSet::new(),
             query: String::new(),
             sort_key: SortKey::Name,
             sort: ColumnSort::Default,
@@ -120,6 +124,28 @@ impl PackagesTableDelegate {
     fn set_query(&mut self, query: &str) {
         self.query = query.trim().to_lowercase();
         self.refilter();
+    }
+
+    fn set_selected(&mut self, name: String, checked: bool) {
+        if checked {
+            self.selected.insert(name);
+        } else {
+            self.selected.remove(&name);
+        }
+    }
+
+    fn select_visible(&mut self, checked: bool) {
+        for name in self.visible.iter().map(package_target).collect::<Vec<_>>() {
+            self.set_selected(name, checked);
+        }
+    }
+
+    fn all_visible_selected(&self) -> bool {
+        !self.visible.is_empty()
+            && self
+                .visible
+                .iter()
+                .all(|package| self.selected.contains(&package_target(package)))
     }
 
     /// Column index the current sort key lives in.
@@ -261,6 +287,42 @@ impl TableDelegate for PackagesTableDelegate {
         ui::empty_state(IconName::Search, message, tr("packages.empty_hint"), cx).into_any_element()
     }
 
+    fn render_th(
+        &mut self,
+        col_ix: usize,
+        _window: &mut Window,
+        cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        let label = self.column(col_ix, cx).name.clone();
+        h_flex()
+            .gap_2()
+            .items_center()
+            .when(col_ix == 0, |el| {
+                el.child(
+                    Checkbox::new("select-visible")
+                        .accessibility_label(tr("packages.select_visible"))
+                        .tooltip(tr("packages.select_visible"))
+                        .checked(self.all_visible_selected())
+                        .disabled(self.loading || self.visible.is_empty())
+                        .on_click(cx.listener(|state, checked: &bool, _window, cx| {
+                            cx.stop_propagation();
+                            state.delegate_mut().select_visible(*checked);
+                            cx.notify();
+                        })),
+                )
+            })
+            .child(label)
+    }
+
+    fn render_last_empty_col(
+        &mut self,
+        _window: &mut Window,
+        _cx: &mut Context<TableState<Self>>,
+    ) -> impl IntoElement {
+        // The action column already reserves room for the vertical scrollbar.
+        div().w_0().flex_shrink_0()
+    }
+
     fn render_td(
         &mut self,
         row_ix: usize,
@@ -273,11 +335,36 @@ impl TableDelegate for PackagesTableDelegate {
         };
 
         match col_ix {
-            0 => div()
-                .overflow_hidden()
-                .truncate()
-                .child(package.name.clone())
-                .into_any_element(),
+            0 => {
+                let name = package_target(package);
+                let selected = self.selected.contains(&name);
+                h_flex()
+                    .w_full()
+                    .overflow_hidden()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Checkbox::new(("select-package", row_ix))
+                            .accessibility_label(
+                                rust_i18n::t!("packages.select_package", pkg = name.as_str())
+                                    .to_string(),
+                            )
+                            .checked(selected)
+                            .disabled(self.loading)
+                            .on_click(cx.listener(move |state, checked: &bool, _window, cx| {
+                                state.delegate_mut().set_selected(name.clone(), *checked);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .child(package.name.clone()),
+                    )
+                    .into_any_element()
+            }
             1 => div()
                 .overflow_hidden()
                 .truncate()
@@ -297,21 +384,24 @@ impl TableDelegate for PackagesTableDelegate {
                 .into_any_element(),
             _ => {
                 let view = self.view.clone();
-                let name = package.name.clone();
+                let name = package_target(package);
                 h_flex()
                     .w_full()
                     .items_center()
-                    .justify_end()
+                    .justify_start()
                     .child(
                         Button::new(("uninstall", row_ix))
                             .danger()
                             .outline()
                             .with_size(Size::Small)
                             .label(tr("packages.uninstall"))
-                            .on_click(move |_ev, _window, cx| {
+                            .disabled(self.loading)
+                            .on_click(move |_ev, window, cx| {
                                 let name = name.clone();
-                                view.update(cx, |view, cx| view.start_uninstall(name, cx))
-                                    .ok();
+                                view.update(cx, |view, cx| {
+                                    view.open_uninstall_dialog(vec![name], window, cx)
+                                })
+                                .ok();
                             }),
                     )
                     .into_any_element()
@@ -327,8 +417,6 @@ pub struct PackagesView {
     include_repo: bool,
     error: Option<String>,
     load_generation: u64,
-    /// Package name and purge choice pending uninstall confirmation.
-    confirm_target: Option<(String, bool)>,
     /// Weak handle to InstallView, used to delegate the uninstall operation.
     pub install_view: Option<WeakEntity<InstallView>>,
     /// Called before uninstall starts — used by AppView to switch to the Install tab.
@@ -384,7 +472,6 @@ impl PackagesView {
             include_repo: false,
             error: None,
             load_generation: 0,
-            confirm_target: None,
             install_view: None,
             on_tab_switch: None,
             tracks_window_bounds: false,
@@ -411,12 +498,12 @@ impl PackagesView {
     /// Reloads the package list from apt on a background thread.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.error = None;
-        self.confirm_target = None;
         self.load_generation += 1;
         let generation = self.load_generation;
         let include_repo = self.include_repo;
 
         self.table_state.update(cx, |state, cx| {
+            state.delegate_mut().selected.clear();
             state.delegate_mut().set_loading(true);
             state.refresh(cx);
             cx.notify();
@@ -441,7 +528,6 @@ impl PackagesView {
                     cx.notify();
                 });
                 view.error = error;
-                view.confirm_target = None;
                 cx.notify();
             })
             .ok();
@@ -449,18 +535,105 @@ impl PackagesView {
         .detach();
     }
 
-    fn start_uninstall(&mut self, name: String, cx: &mut Context<Self>) {
-        self.confirm_target = Some((name, false));
-        cx.notify();
+    fn start_uninstall_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let delegate = self.table_state.read(cx).delegate();
+        if delegate.loading || delegate.selected.is_empty() {
+            return;
+        }
+        let names = delegate.selected.iter().cloned().collect();
+        self.open_uninstall_dialog(names, window, cx);
     }
 
-    fn confirm_uninstall(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (name, purge) = match self.confirm_target.take() {
-            Some(target) => target,
-            None => return,
-        };
-        cx.notify();
+    fn open_uninstall_dialog(
+        &mut self,
+        names: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let purge_state = cx.new(|_| false);
+        let weak = cx.weak_entity();
+        window.open_alert_dialog(cx, move |dialog, _, cx| {
+            let purge = *purge_state.read(cx);
+            let purge_toggle = purge_state.clone();
+            let purge_confirm = purge_state.clone();
+            let names_confirm = names.clone();
+            let weak = weak.clone();
+            dialog
+                .confirm()
+                .width(px(460.))
+                .title(tr("common.uninstall"))
+                .icon(
+                    Icon::new(IconName::TriangleAlert)
+                        .size_6()
+                        .text_color(cx.theme().danger),
+                )
+                .description(if names.len() == 1 {
+                    rust_i18n::t!("packages.remove_package_confirm", pkg = names[0].as_str())
+                        .to_string()
+                } else {
+                    rust_i18n::t!("packages.remove_packages_confirm", count = names.len())
+                        .to_string()
+                })
+                .when(names.len() > 1, |dialog| {
+                    dialog.child(
+                        div()
+                            .id("uninstall-targets")
+                            .max_h(px(160.))
+                            .overflow_y_scroll()
+                            .p_3()
+                            .rounded_md()
+                            .bg(cx.theme().muted.opacity(0.4))
+                            .text_sm()
+                            .children(names.iter().map(|name| div().child(name.clone()))),
+                    )
+                })
+                .child(
+                    v_flex()
+                        .gap_2()
+                        .child(
+                            Checkbox::new("purge-config")
+                                .label(tr("common.purge_config"))
+                                .checked(purge)
+                                .on_click(move |checked, window, cx| {
+                                    purge_toggle.update(cx, |purge, cx| {
+                                        *purge = *checked;
+                                        cx.notify();
+                                    });
+                                    window.refresh();
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(if purge {
+                                    "install.purge_hint"
+                                } else {
+                                    "install.remove_hint"
+                                })),
+                        ),
+                )
+                .ok_text(tr("common.uninstall"))
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text(tr("common.cancel"))
+                .on_ok(move |_, window, cx| {
+                    let purge = *purge_confirm.read(cx);
+                    weak.update(cx, |view, cx| {
+                        view.confirm_uninstall(names_confirm.clone(), purge, window, cx)
+                    })
+                    .ok();
+                    true
+                })
+        });
+    }
 
+    fn confirm_uninstall(
+        &mut self,
+        names: Vec<String>,
+        purge: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // Switch to the Install tab so the user sees the streaming log.
         if let Some(ref f) = self.on_tab_switch {
             f(cx);
@@ -470,15 +643,10 @@ impl PackagesView {
         if let Some(ref install_weak) = self.install_view {
             install_weak
                 .update(cx, |install, install_cx| {
-                    install.start_uninstall_by_name(name, purge, window, install_cx);
+                    install.start_uninstall_by_names(names, purge, window, install_cx);
                 })
                 .ok();
         }
-    }
-
-    fn cancel_confirm(&mut self, cx: &mut Context<Self>) {
-        self.confirm_target = None;
-        cx.notify();
     }
 }
 
@@ -496,12 +664,16 @@ impl Render for PackagesView {
         }
 
         let error = self.error.clone();
-        let confirm_target = self.confirm_target.clone();
         let include_repo = self.include_repo;
-        let (shown, total, loading) = {
+        let (shown, total, loading, selected_count) = {
             let state = self.table_state.read(cx);
             let delegate = state.delegate();
-            (delegate.visible.len(), delegate.all.len(), delegate.loading)
+            (
+                delegate.visible.len(),
+                delegate.all.len(),
+                delegate.loading,
+                delegate.selected.len(),
+            )
         };
         let count_label = if loading {
             tr("packages.loading")
@@ -514,50 +686,6 @@ impl Render for PackagesView {
             .min_h_0()
             .p_3()
             .gap_3()
-            // Toolbar: search box, refresh, repository toggle, and the counter
-            .child(
-                h_flex()
-                    .flex_shrink_0()
-                    .p_3()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
-                    .gap_3()
-                    .items_center()
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(&self.query)
-                                .prefix(Icon::new(IconName::Search).size_4())
-                                .cleanable(true),
-                        ),
-                    )
-                    .child(
-                        Button::new("refresh")
-                            .icon(IconName::RefreshCw)
-                            .loading(loading)
-                            .label(tr("packages.refresh"))
-                            .on_click(cx.listener(|view, _ev, _window, cx| view.reload(cx))),
-                    )
-                    .child(
-                        Checkbox::new("include-repo")
-                            .label(tr("packages.include_repository"))
-                            .checked(include_repo)
-                            .disabled(loading)
-                            .on_click(cx.listener(|view, checked: &bool, _window, cx| {
-                                view.include_repo = *checked;
-                                view.reload(cx);
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(count_label),
-                    ),
-            )
-            // Error banner
             .when_some(error, |el, message| {
                 el.child(
                     div()
@@ -574,82 +702,150 @@ impl Render for PackagesView {
                         ),
                 )
             })
-            // Confirm dialog (inline overlay)
-            .when_some(confirm_target, |el, (name, purge)| {
-                el.child(
-                    h_flex()
-                        .gap_3()
-                        .px_4()
-                        .py_3()
-                        .rounded_lg()
-                        .bg(cx.theme().danger.opacity(0.06))
-                        .border_1()
-                        .border_color(cx.theme().danger.opacity(0.35))
-                        .child(
-                            Icon::new(IconName::TriangleAlert)
-                                .size_5()
-                                .text_color(cx.theme().danger),
-                        )
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_2()
-                                .child(
-                                    div().text_color(cx.theme().foreground).child(
-                                        rust_i18n::t!(
-                                            "packages.remove_package_confirm",
-                                            pkg = name.as_str()
-                                        )
-                                        .to_string(),
-                                    ),
-                                )
-                                .child(
-                                    Checkbox::new("purge-config")
-                                        .label(tr("common.purge_config"))
-                                        .checked(purge)
-                                        .on_click(cx.listener(
-                                            |view, checked: &bool, _window, cx| {
-                                                if let Some((_, purge)) = &mut view.confirm_target {
-                                                    *purge = *checked;
-                                                }
-                                                cx.notify();
-                                            },
-                                        )),
-                                ),
-                        )
-                        .child(
-                            Button::new("confirm-yes")
-                                .danger()
-                                .with_size(Size::Small)
-                                .label(tr("packages.yes_remove"))
-                                .on_click(cx.listener(|view, _ev, window, cx| {
-                                    view.confirm_uninstall(window, cx);
-                                })),
-                        )
-                        .child(
-                            Button::new("confirm-no")
-                                .with_size(Size::Small)
-                                .label(tr("packages.cancel"))
-                                .on_click(cx.listener(|view, _ev, _window, cx| {
-                                    view.cancel_confirm(cx);
-                                })),
-                        ),
-                )
-            })
             .child(
-                div()
+                v_flex()
                     .flex_1()
                     .min_h_0()
                     .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border)
                     .bg(cx.theme().background)
                     .overflow_hidden()
                     .child(
-                        DataTable::new(&self.table_state)
-                            .stripe(true)
-                            .bordered(true),
+                        v_flex()
+                            .flex_shrink_0()
+                            .p_3()
+                            .gap_3()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div().flex_1().min_w_0().child(
+                                            Input::new(&self.query)
+                                                .small()
+                                                .prefix(Icon::new(IconName::Search).size_4())
+                                                .cleanable(true),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new("refresh")
+                                            .with_size(Size::Small)
+                                            .icon(IconName::RefreshCw)
+                                            .loading(loading)
+                                            .label(tr("packages.refresh"))
+                                            .on_click(cx.listener(|view, _ev, _window, cx| {
+                                                view.reload(cx)
+                                            })),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .flex_wrap()
+                                    .gap_2()
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_3()
+                                            .child(
+                                                Checkbox::new("include-repo")
+                                                    .label(tr("packages.include_repository"))
+                                                    .checked(include_repo)
+                                                    .disabled(loading)
+                                                    .on_click(cx.listener(
+                                                        |view, checked: &bool, _window, cx| {
+                                                            view.include_repo = *checked;
+                                                            view.reload(cx);
+                                                        },
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child(count_label),
+                                            ),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .when(selected_count > 0, |el| {
+                                                el.child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(cx.theme().primary)
+                                                        .child(
+                                                            rust_i18n::t!(
+                                                                "packages.selected_count",
+                                                                count = selected_count
+                                                            )
+                                                            .to_string(),
+                                                        ),
+                                                )
+                                                .child(
+                                                    Button::new("clear-selection")
+                                                        .ghost()
+                                                        .with_size(Size::Small)
+                                                        .label(tr("packages.clear_selection"))
+                                                        .disabled(loading)
+                                                        .on_click(cx.listener(
+                                                            |view, _ev, _window, cx| {
+                                                                view.table_state.update(
+                                                                    cx,
+                                                                    |state, cx| {
+                                                                        state
+                                                                            .delegate_mut()
+                                                                            .selected
+                                                                            .clear();
+                                                                        cx.notify();
+                                                                    },
+                                                                );
+                                                            },
+                                                        )),
+                                                )
+                                            })
+                                            .child(
+                                                Button::new("uninstall-selected")
+                                                    .danger()
+                                                    .with_size(Size::Small)
+                                                    .label(tr("packages.uninstall_selected"))
+                                                    .disabled(loading || selected_count == 0)
+                                                    .on_click(cx.listener(
+                                                        |view, _ev, window, cx| {
+                                                            view.start_uninstall_selected(
+                                                                window, cx,
+                                                            );
+                                                        },
+                                                    )),
+                                            ),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .border_t_1()
+                            .border_color(cx.theme().border)
+                            .child(
+                                DataTable::new(&self.table_state)
+                                    .stripe(true)
+                                    .bordered(false),
+                            ),
                     ),
             )
+    }
+}
+
+/// Keep different installed architectures distinct when selecting and removing.
+fn package_target(package: &InstalledPackage) -> String {
+    if package.architecture.is_empty() {
+        package.name.clone()
+    } else {
+        format!("{}:{}", package.name, package.architecture)
     }
 }
 
@@ -727,6 +923,56 @@ mod tests {
             install_date: None,
             update_date: None,
         }
+    }
+
+    #[test]
+    fn selection_survives_search_and_sorting() {
+        let mut table = PackagesTableDelegate::new(WeakEntity::new_invalid(), 900.);
+        table.set_packages(vec![unknown_time("alpha"), unknown_time("beta")]);
+        table.set_selected("beta:all".into(), true);
+        table.set_query("alpha");
+        assert_eq!(table.visible.len(), 1);
+        assert!(table.selected.contains("beta:all"));
+        table.set_query("");
+        table.sort = ColumnSort::Descending;
+        table.refilter();
+        assert_eq!(table.visible[0].name, "beta");
+        assert!(table.selected.contains(&package_target(&table.visible[0])));
+    }
+
+    #[test]
+    fn select_filtered_packages_preserves_hidden_selections() {
+        let mut table = PackagesTableDelegate::new(WeakEntity::new_invalid(), 900.);
+        table.set_packages(vec![unknown_time("alpha"), unknown_time("beta")]);
+        table.set_selected("beta:all".into(), true);
+        table.set_query("alpha");
+        assert!(!table.all_visible_selected());
+        table.select_visible(true);
+        assert!(table.all_visible_selected());
+        assert_eq!(table.selected.len(), 2);
+        table.select_visible(false);
+        assert_eq!(table.selected, BTreeSet::from(["beta:all".into()]));
+        table.set_query("missing");
+        assert!(!table.all_visible_selected());
+        table.select_visible(true);
+        assert_eq!(table.selected.len(), 1);
+    }
+
+    #[test]
+    fn selection_distinguishes_installed_architectures() {
+        let mut table = PackagesTableDelegate::new(WeakEntity::new_invalid(), 900.);
+        let native = package("lib", "1", 100, 100);
+        let mut foreign = native.clone();
+        foreign.architecture = "i386".into();
+        table.set_packages(vec![native, foreign]);
+        table.select_visible(true);
+        assert_eq!(
+            table.selected,
+            BTreeSet::from(["lib:amd64".into(), "lib:i386".into()])
+        );
+        table.set_selected("lib:i386".into(), false);
+        assert_eq!(table.selected, BTreeSet::from(["lib:amd64".into()]));
+        assert!(!table.all_visible_selected());
     }
 
     #[test]

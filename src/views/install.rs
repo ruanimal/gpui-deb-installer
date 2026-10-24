@@ -43,7 +43,7 @@ pub enum InstallState {
         log: Vec<String>,
     },
     Uninstalling {
-        pkg_name: String,
+        pkg_names: Vec<String>,
         log: Vec<String>,
     },
     Done {
@@ -88,7 +88,7 @@ pub struct InstallView {
     /// rather than querying the package database again.
     pub desktop_entries: Option<Arc<dyn Fn(&App) -> Vec<PathBuf> + 'static>>,
     _subscriptions: Vec<Subscription>,
-    /// Called when a package is successfully installed/removed.
+    /// Called after a successful install or any removal attempt (which may partially succeed).
     pub on_installed: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
     /// Called when a .deb file has been successfully loaded (path provided).
     pub on_deb_loaded: Option<Arc<dyn Fn(PathBuf, &mut Window, &mut App) + 'static>>,
@@ -450,7 +450,7 @@ impl InstallView {
         });
     }
 
-    /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
+    /// Reuses the streaming uninstall UI for the package details action.
     pub fn start_uninstall_by_name(
         &mut self,
         pkg_name: String,
@@ -458,12 +458,23 @@ impl InstallView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.is_busy() {
+        self.start_uninstall_by_names(vec![pkg_name], purge, window, cx);
+    }
+
+    /// Uninstalls the confirmed selection in a single apt transaction.
+    pub fn start_uninstall_by_names(
+        &mut self,
+        pkg_names: Vec<String>,
+        purge: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_busy() || pkg_names.is_empty() {
             return;
         }
         self.log_copied = false;
         self.state = InstallState::Uninstalling {
-            pkg_name: pkg_name.clone(),
+            pkg_names: pkg_names.clone(),
             log: Vec::new(),
         };
         self.open_target = None;
@@ -475,10 +486,10 @@ impl InstallView {
         cx.spawn_in(window, async move |weak, cx| {
             let (log_tx, log_rx) = async_channel::unbounded::<String>();
 
-            let name_bg = pkg_name.clone();
+            let names_bg = pkg_names.clone();
             let result_task = cx
                 .background_executor()
-                .spawn(async move { dpkg::remove_package_streaming(name_bg, purge, log_tx) });
+                .spawn(async move { dpkg::remove_packages_streaming(names_bg, purge, log_tx) });
 
             while let Ok(line) = log_rx.recv().await {
                 let l = line.clone();
@@ -508,20 +519,25 @@ impl InstallView {
                 Ok(()) => {
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: rust_i18n::t!(
-                                "install.package_uninstalled",
-                                pkg = pkg_name.as_str()
-                            )
-                            .to_string(),
+                            message: if pkg_names.len() == 1 {
+                                rust_i18n::t!(
+                                    "install.package_uninstalled",
+                                    pkg = pkg_names[0].as_str()
+                                )
+                                .to_string()
+                            } else {
+                                rust_i18n::t!(
+                                    "install.packages_uninstalled",
+                                    count = pkg_names.len()
+                                )
+                                .to_string()
+                            },
                             success: true,
                             log: final_log,
                         };
                         cx.notify();
                     })
                     .ok();
-                    if let Some(cb) = on_installed {
-                        cx.update(|window, cx| cb(window, cx)).ok();
-                    }
                 }
                 Err(e) => {
                     weak.update(cx, |view, cx| {
@@ -538,6 +554,10 @@ impl InstallView {
                     })
                     .ok();
                 }
+            }
+            // apt may remove some packages before reporting an error.
+            if let Some(cb) = on_installed {
+                cx.update(|window, cx| cb(window, cx)).ok();
             }
         })
         .detach();
@@ -646,17 +666,16 @@ impl Render for InstallView {
                         cx,
                     )
                 }
-                InstallState::Uninstalling { pkg_name, log } => {
+                InstallState::Uninstalling { pkg_names, log } => {
                     let list_state = self.log_list_state.clone();
-                    render_with_log(
-                        &rust_i18n::t!("install.uninstalling", pkg = pkg_name.as_str()).to_string(),
-                        log,
-                        None,
-                        None,
-                        list_state,
-                        self.log_copied,
-                        cx,
-                    )
+                    let title = if pkg_names.len() == 1 {
+                        rust_i18n::t!("install.uninstalling", pkg = pkg_names[0].as_str())
+                            .to_string()
+                    } else {
+                        rust_i18n::t!("install.uninstalling_packages", count = pkg_names.len())
+                            .to_string()
+                    };
+                    render_with_log(&title, log, None, None, list_state, self.log_copied, cx)
                 }
                 InstallState::Done {
                     message,

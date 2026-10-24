@@ -42,7 +42,7 @@ impl AppView {
             cx.new(|cx| InstallView::new(window, initial_deb_path, initial_auto_close, cx));
         let files_preview_view = cx.new(|cx| FilesPreviewView::new(window, cx));
 
-        // When a package is installed/uninstalled, reload the Installed list.
+        // Reload after successful installs and all removal attempts.
         {
             let packages_weak = packages_view.downgrade();
             install_view.update(cx, |view, _cx| {
