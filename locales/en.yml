@@ -1,16 +1,19 @@
 common:
+  copied: "Copied"
+  retry: "Try again"
   install: &install "Install"
   dependencies: &dependencies "Dependencies"
   files: &files "Files"
   installed: &installed "Installed"
   uninstall: &uninstall "Uninstall"
-  purge_config: "Also remove package configuration files (purge)"
+  purge_config: "Remove configuration files"
   cancel: &cancel "Cancel"
   package: &package "Package"
   version: &version "Version"
   action: &action "Action"
 
 app:
+  toggle_theme: "Switch light / dark theme"
   name: "Deb Installer"
   tab:
     install: *install
@@ -20,6 +23,14 @@ app:
 warning:
   pkexec_missing: "Warning: pkexec not found. Package installation/removal will fail.\nPlease install policykit-1 (e.g. sudo apt install policykit-1)."
 install:
+  purge_hint: "Package configuration files will also be removed."
+  remove_hint: "Package configuration files will be kept."
+  welcome: "A new home for your packages"
+  idle_hint: "Drop a .deb package here, or browse your files"
+  inspect_hint: "Review package details before making changes to your system"
+  progress_hint: "Authentication may be required. You can follow the output below."
+  copy_output: "Copy output"
+  no_output: "No output for this operation."
   select_deb_package: "Select .deb package"
   selected_not_deb: "Selected file is not a .deb package."
   package_installed: "Package installed successfully '%{pkg}'."
@@ -30,7 +41,6 @@ install:
   dependencies_hint_markdown: "_Select a .deb file in the **Install** tab to view its dependencies._"
   installing: "Installing '%{pkg}'..."
   uninstalling: "Uninstalling '%{pkg}'..."
-  idle_hint: "Click the button below to select a .deb file"
   select_deb_file: "Select .deb File"
   unknown: "unknown"
   read_deb_failed: "Failed to read .deb info: %{err}"
@@ -63,6 +73,7 @@ install:
   open_app_failed: "Failed to open the application: %{err}"
   output: "Output"
 packages:
+  empty_hint: "Try another search or enable repository packages."
   uninstall: *uninstall
   remove_package_confirm: "Remove package '%{pkg}'?"
   yes_remove: "Yes, Remove"
@@ -82,10 +93,15 @@ packages:
     action: *action
   empty: "No packages installed yet."
 files_preview:
+  idle_hint: "Inspect the files and application entries a package contains before installing."
+  go_install: "Choose a package"
+  loading_hint: "Preparing the file tree and previews. Larger packages may take a moment."
+  load_failed: "Could not read package files"
+  no_match: "No files match your search."
   select_first: "Please select a .deb file first"
   loading: "Loading..."
   copy_path: "Copy Path"
-  select_left: "<- Select a file from the left"
+  select_left: "Select a file to preview"
   unsupported_preview: "Preview is not supported for this file type"
   search_files: "Search %{count} files..."
   error: "Error: %{err}"

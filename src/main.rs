@@ -1,4 +1,5 @@
 mod app;
+mod assets;
 mod i18n;
 mod models;
 mod utils;
@@ -6,16 +7,14 @@ mod views;
 
 rust_i18n::i18n!("locales", fallback = "en");
 
-use gpui_kit::{
-    App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
-};
-use gpui_kit::assets::Assets;
+use assets::AppAssets;
+use gpui_kit::{App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use std::path::PathBuf;
 
+use crate::models::config::AppConfig;
 use app::AppView;
 use i18n::{init_locale, tr};
 use utils::dpkg;
-use crate::models::config::AppConfig;
 
 fn main() {
     init_locale();
@@ -23,7 +22,11 @@ fn main() {
     // Parse command line arguments for deb file path
     let deb_path = std::env::args().nth(1).and_then(|arg| {
         let path = PathBuf::from(&arg);
-        if path.extension().and_then(|e| e.to_str()) == Some("deb") {
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("deb"))
+        {
             Some(path)
         } else {
             None
@@ -31,9 +34,11 @@ fn main() {
     });
 
     gpui_kit::application()
-        .with_assets(Assets)
+        .with_assets(AppAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
+            gpui_kit::component::Theme::sync_system_appearance(None, cx);
+            views::ui::apply_theme(cx);
 
             if !dpkg::check_pkexec() {
                 eprintln!("{}", tr("warning.pkexec_missing"));
@@ -50,6 +55,7 @@ fn main() {
                         title: Some(tr("app.name").into()),
                         ..Default::default()
                     }),
+                    window_min_size: Some(size(px(720.), px(480.))),
                     focus: true,
                     show: true,
                     app_id: Some("gpui-deb-installer".to_string()),

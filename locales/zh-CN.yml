@@ -1,16 +1,19 @@
 common:
+  copied: "已复制"
+  retry: "重试"
   install: &install "安装"
   dependencies: &dependencies "依赖"
   files: &files "文件"
   installed: &installed "已安装"
   uninstall: &uninstall "卸载"
-  purge_config: "同时清除软件包配置文件（purge）"
+  purge_config: "卸载时清除配置文件"
   cancel: &cancel "取消"
   package: &package "包名"
   version: &version "版本"
   action: &action "操作"
 
 app:
+  toggle_theme: "切换浅色 / 深色主题"
   name: "Deb 安装器"
   tab:
     install: *install
@@ -20,6 +23,14 @@ app:
 warning:
   pkexec_missing: "警告：未找到 pkexec，安装/卸载功能将无法使用。\n请先安装 policykit-1（例如：sudo apt install policykit-1）。"
 install:
+  purge_hint: "本次卸载也会清除软件包配置文件。"
+  remove_hint: "本次卸载会保留软件包配置文件。"
+  welcome: "让软件安装更从容"
+  idle_hint: "将 .deb 软件包拖到这里，或从文件中选择"
+  inspect_hint: "先查看软件包信息，再决定是否安装"
+  progress_hint: "可能需要授权认证，可在下方查看实时输出。"
+  copy_output: "复制日志"
+  no_output: "本次操作没有日志输出。"
   select_deb_package: "选择 .deb 包"
   selected_not_deb: "所选文件不是 .deb 包。"
   package_installed: "软件包安装成功 '%{pkg}'。"
@@ -30,7 +41,6 @@ install:
   dependencies_hint_markdown: "_请在**安装**标签页中选择一个 .deb 文件以查看依赖。_"
   installing: "正在安装 '%{pkg}'..."
   uninstalling: "正在卸载 '%{pkg}'..."
-  idle_hint: "点击下方按钮选择一个 .deb 文件"
   select_deb_file: "选择 .deb 文件"
   unknown: "未知"
   read_deb_failed: "读取 .deb 信息失败: %{err}"
@@ -63,6 +73,7 @@ install:
   open_app_failed: "打开应用失败: %{err}"
   output: "输出"
 packages:
+  empty_hint: "试试其他关键词，或开启「显示软件源中的包」。"
   uninstall: *uninstall
   remove_package_confirm: "删除软件包 '%{pkg}'?"
   yes_remove: "是，删除"
@@ -82,10 +93,15 @@ packages:
     action: *action
   empty: "暂无已安装软件包。"
 files_preview:
+  idle_hint: "安装前先看看软件包包含的文件和应用入口。"
+  go_install: "选择软件包"
+  loading_hint: "正在准备文件目录与预览，较大的软件包可能需要稍等片刻。"
+  load_failed: "无法读取包内文件"
+  no_match: "没有符合搜索条件的文件。"
   select_first: "请先选择 .deb 文件"
   loading: "加载中..."
   copy_path: "复制路径"
-  select_left: "<- 从左侧选择文件"
+  select_left: "选择文件，查看内容"
   unsupported_preview: "不支持预览此文件类型"
   search_files: "搜索 %{count} 个文件..."
   error: "错误: %{err}"

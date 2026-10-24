@@ -1,6 +1,6 @@
 use chrono::{DateTime, Local};
 use gpui_kit::component::{
-    ActiveTheme, Sizable, Size,
+    ActiveTheme, Disableable, Icon, Sizable, Size,
     button::{Button, ButtonVariants as _},
     checkbox::Checkbox,
     h_flex,
@@ -14,10 +14,12 @@ use gpui_kit::{
 };
 use std::sync::Arc;
 
+use super::ui;
 use crate::i18n::tr;
 use crate::models::package::InstalledPackage;
 use crate::utils::apt;
 use crate::views::install::InstallView;
+use gpui_kit::assets::IconName;
 
 const TIME_FORMAT: &str = "%Y-%m-%d %H:%M";
 
@@ -35,9 +37,9 @@ const ACTION_PADDING_RIGHT: f32 = 22.;
 const ACTION_WIDTH: f32 = 102.;
 /// Floor for the name column, so it stays readable in a very narrow window.
 const NAME_MIN_WIDTH: f32 = 150.;
-/// Window padding (`p_4`), the table border, and a little slack so the columns
+/// Window padding (`p_3`), the table border, and a little slack so the columns
 /// never overflow into a horizontal scrollbar.
-const TABLE_INSET: f32 = 36.;
+const TABLE_INSET: f32 = 28.;
 
 /// Field the table is sorted by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,13 +258,7 @@ impl TableDelegate for PackagesTableDelegate {
             tr("packages.no_match")
         };
 
-        v_flex()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .text_color(cx.theme().muted_foreground)
-            .child(message)
-            .into_any_element()
+        ui::empty_state(IconName::Search, message, tr("packages.empty_hint"), cx).into_any_element()
     }
 
     fn render_td(
@@ -309,6 +305,7 @@ impl TableDelegate for PackagesTableDelegate {
                     .child(
                         Button::new(("uninstall", row_ix))
                             .danger()
+                            .outline()
                             .with_size(Size::Small)
                             .label(tr("packages.uninstall"))
                             .on_click(move |_ev, _window, cx| {
@@ -329,6 +326,7 @@ pub struct PackagesView {
     /// Whether packages that still exist in a repository are listed too.
     include_repo: bool,
     error: Option<String>,
+    load_generation: u64,
     /// Package name and purge choice pending uninstall confirmation.
     confirm_target: Option<(String, bool)>,
     /// Weak handle to InstallView, used to delegate the uninstall operation.
@@ -385,6 +383,7 @@ impl PackagesView {
             query,
             include_repo: false,
             error: None,
+            load_generation: 0,
             confirm_target: None,
             install_view: None,
             on_tab_switch: None,
@@ -412,6 +411,9 @@ impl PackagesView {
     /// Reloads the package list from apt on a background thread.
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.error = None;
+        self.confirm_target = None;
+        self.load_generation += 1;
+        let generation = self.load_generation;
         let include_repo = self.include_repo;
 
         self.table_state.update(cx, |state, cx| {
@@ -427,6 +429,9 @@ impl PackagesView {
                 .await;
 
             weak.update(cx, |view, cx| {
+                if generation != view.load_generation {
+                    return;
+                }
                 let error = result.as_ref().err().map(|err| err.to_string());
                 let packages = result.unwrap_or_default();
 
@@ -483,6 +488,7 @@ impl Render for PackagesView {
         // immediately and the entity does not exist yet at that point.
         if !self.tracks_window_bounds {
             self.tracks_window_bounds = true;
+            self.apply_table_width(window, cx);
             let subscription = cx.observe_window_bounds(window, |view, window, cx| {
                 view.apply_table_width(window, cx);
             });
@@ -492,31 +498,44 @@ impl Render for PackagesView {
         let error = self.error.clone();
         let confirm_target = self.confirm_target.clone();
         let include_repo = self.include_repo;
-        let (shown, total) = {
+        let (shown, total, loading) = {
             let state = self.table_state.read(cx);
             let delegate = state.delegate();
-            (delegate.visible.len(), delegate.all.len())
+            (delegate.visible.len(), delegate.all.len(), delegate.loading)
         };
-        let count_label = rust_i18n::t!("packages.count", shown = shown, total = total).to_string();
+        let count_label = if loading {
+            tr("packages.loading")
+        } else {
+            rust_i18n::t!("packages.count", shown = shown, total = total).to_string()
+        };
 
         v_flex()
             .size_full()
-            .p_4()
+            .min_h_0()
+            .p_3()
             .gap_3()
             // Toolbar: search box, refresh, repository toggle, and the counter
             .child(
                 h_flex()
+                    .flex_shrink_0()
+                    .p_3()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
                     .gap_3()
                     .items_center()
                     .child(
-                        div()
-                            .w(px(230.))
-                            .flex_shrink_0()
-                            .child(Input::new(&self.query).cleanable(true)),
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.query)
+                                .prefix(Icon::new(IconName::Search).size_4())
+                                .cleanable(true),
+                        ),
                     )
                     .child(
                         Button::new("refresh")
-                            .with_size(Size::Small)
+                            .icon(IconName::RefreshCw)
+                            .loading(loading)
                             .label(tr("packages.refresh"))
                             .on_click(cx.listener(|view, _ev, _window, cx| view.reload(cx))),
                     )
@@ -524,6 +543,7 @@ impl Render for PackagesView {
                         Checkbox::new("include-repo")
                             .label(tr("packages.include_repository"))
                             .checked(include_repo)
+                            .disabled(loading)
                             .on_click(cx.listener(|view, checked: &bool, _window, cx| {
                                 view.include_repo = *checked;
                                 view.reload(cx);
@@ -531,7 +551,8 @@ impl Render for PackagesView {
                     )
                     .child(
                         div()
-                            .text_sm()
+                            .flex_shrink_0()
+                            .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(count_label),
                     ),
@@ -558,14 +579,22 @@ impl Render for PackagesView {
                 el.child(
                     h_flex()
                         .gap_3()
-                        .px_3()
-                        .py_2()
-                        .rounded_md()
-                        .bg(cx.theme().danger.opacity(0.1))
+                        .px_4()
+                        .py_3()
+                        .rounded_lg()
+                        .bg(cx.theme().danger.opacity(0.06))
                         .border_1()
-                        .border_color(cx.theme().danger)
+                        .border_color(cx.theme().danger.opacity(0.35))
                         .child(
-                            v_flex().flex_1().min_w_0().gap_2()
+                            Icon::new(IconName::TriangleAlert)
+                                .size_5()
+                                .text_color(cx.theme().danger),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_2()
                                 .child(
                                     div().text_color(cx.theme().foreground).child(
                                         rust_i18n::t!(
@@ -579,12 +608,14 @@ impl Render for PackagesView {
                                     Checkbox::new("purge-config")
                                         .label(tr("common.purge_config"))
                                         .checked(purge)
-                                        .on_click(cx.listener(|view, checked: &bool, _window, cx| {
-                                            if let Some((_, purge)) = &mut view.confirm_target {
-                                                *purge = *checked;
-                                            }
-                                            cx.notify();
-                                        })),
+                                        .on_click(cx.listener(
+                                            |view, checked: &bool, _window, cx| {
+                                                if let Some((_, purge)) = &mut view.confirm_target {
+                                                    *purge = *checked;
+                                                }
+                                                cx.notify();
+                                            },
+                                        )),
                                 ),
                         )
                         .child(
@@ -607,11 +638,17 @@ impl Render for PackagesView {
                 )
             })
             .child(
-                div().flex_1().overflow_hidden().child(
-                    DataTable::new(&self.table_state)
-                        .stripe(true)
-                        .bordered(true),
-                ),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .rounded_lg()
+                    .bg(cx.theme().background)
+                    .overflow_hidden()
+                    .child(
+                        DataTable::new(&self.table_state)
+                            .stripe(true)
+                            .bordered(true),
+                    ),
             )
     }
 }

@@ -1,23 +1,28 @@
-use gpui_kit::{
-    App, AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement, ParentElement, Render,
-    Styled, Subscription, VisualContext, WeakEntity, Window, div, img, px, SharedString,
-};
 use gpui_kit::component::{
-    ActiveTheme,
-    h_flex, v_flex,
+    ActiveTheme, Icon, IconName, Sizable,
+    button::{Button, ButtonVariants as _},
+    h_flex,
     input::{Editor, EditorState, Input, InputEvent, InputState},
     list::ListItem,
     menu::{ContextMenuExt, PopupMenuItem},
-    resizable::{h_resizable, resizable_panel, ResizableState},
+    resizable::{ResizableState, h_resizable, resizable_panel},
+    spinner::Spinner,
     tree::{TreeItem, TreeState, tree},
-    IconName,
+    v_flex,
+};
+use gpui_kit::{
+    App, AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, VisualContext, WeakEntity, Window,
+    div, img, prelude::FluentBuilder, px,
 };
 use std::{path::PathBuf, sync::Arc};
 
+use super::ui;
 use crate::i18n::tr;
 use crate::utils::deb_files::{
     DebFileEntry, DebFileKind, ExtractedDeb, format_size, installed_path, read_cached_file,
 };
+use gpui_kit::assets::IconName as AssetIcon;
 
 // ---------------------------------------------------------------------------
 // State
@@ -28,11 +33,14 @@ pub enum FilesLoadState {
     Loading,
     /// Holds the extracted metadata + temp directory (keeps cache alive).
     Loaded(ExtractedDeb),
-    Error,
+    Error(String),
 }
 
 pub struct FilesPreviewView {
     load_state: FilesLoadState,
+    visible_count: usize,
+    path_copied: bool,
+    pub on_select_package: Option<Arc<dyn Fn(&mut App)>>,
     /// Last deb path we triggered a load for (used to avoid duplicate loads)
     last_loaded_path: Option<PathBuf>,
     tree_state: Entity<TreeState>,
@@ -65,12 +73,14 @@ impl FilesPreviewView {
         });
 
         // Search Input State
-        let search_state = cx.new(|cx| {
-            InputState::new(window, cx).placeholder(tr("files_preview.select_first"))
-        });
+        let search_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(tr("files_preview.select_first")));
 
         let mut view = Self {
             load_state: FilesLoadState::Idle,
+            visible_count: 0,
+            path_copied: false,
+            on_select_package: None,
             last_loaded_path: None,
             tree_state,
             resizable_state,
@@ -102,8 +112,12 @@ impl FilesPreviewView {
         self.load_state = FilesLoadState::Idle;
         self.last_loaded_path = None;
         self.selected = None;
-        self.tree_state.update(cx, |state, cx| state.set_items(vec![], cx));
-        self.editor_state.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+        self.path_copied = false;
+        self.visible_count = 0;
+        self.tree_state
+            .update(cx, |state, cx| state.set_items(vec![], cx));
+        self.editor_state
+            .update(cx, |s, cx| s.set_value(String::new(), window, cx));
         self.search_state.update(cx, |s, cx| {
             s.set_value(String::new(), window, cx);
             s.set_placeholder(tr("files_preview.select_first"), window, cx);
@@ -120,6 +134,8 @@ impl FilesPreviewView {
         self.last_loaded_path = Some(path.clone());
         self.load_state = FilesLoadState::Loading;
         self.selected = None;
+        self.path_copied = false;
+        self.visible_count = 0;
 
         // Reset search
         self.search_state.update(cx, |s, cx| {
@@ -128,7 +144,8 @@ impl FilesPreviewView {
         });
 
         // Clear tree
-        self.tree_state.update(cx, |state, cx| state.set_items(vec![], cx));
+        self.tree_state
+            .update(cx, |state, cx| state.set_items(vec![], cx));
 
         // Reset editor
         self.editor_state.update(cx, |s, cx| {
@@ -185,6 +202,7 @@ impl FilesPreviewView {
         }
 
         self.selected = Some(file);
+        self.path_copied = false;
         cx.notify();
     }
 
@@ -196,6 +214,7 @@ impl FilesPreviewView {
         };
 
         let items = if search_text.is_empty() {
+            self.visible_count = entries.len();
             build_tree_items_clean(entries)
         } else {
             let filtered: Vec<DebFileEntry> = entries
@@ -203,6 +222,7 @@ impl FilesPreviewView {
                 .filter(|e| e.path.to_lowercase().contains(&search_text))
                 .cloned()
                 .collect();
+            self.visible_count = filtered.len();
             build_tree_items_clean(&filtered)
         };
 
@@ -219,24 +239,108 @@ impl FilesPreviewView {
 
 impl Render for FilesPreviewView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match &self.load_state {
+            FilesLoadState::Idle => {
+                return v_flex()
+                    .size_full()
+                    .p_4()
+                    .child(
+                        v_flex()
+                            .size_full()
+                            .rounded_lg()
+                            .bg(cx.theme().background)
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .items_center()
+                            .justify_center()
+                            .gap_3()
+                            .child(div().w_full().h(px(190.)).child(ui::empty_state(
+                                AssetIcon::FolderOpen,
+                                tr("files_preview.select_first"),
+                                tr("files_preview.idle_hint"),
+                                cx,
+                            )))
+                            .child(
+                                Button::new("go-to-install")
+                                    .primary()
+                                    .icon(AssetIcon::Package)
+                                    .label(tr("files_preview.go_install"))
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        if let Some(callback) = &view.on_select_package {
+                                            callback(cx);
+                                        }
+                                    })),
+                            ),
+                    )
+                    .into_any_element();
+            }
+            FilesLoadState::Loading => {
+                return v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .child(Spinner::new().large().color(cx.theme().primary))
+                    .child(
+                        div()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(tr("files_preview.loading")),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr("files_preview.loading_hint")),
+                    )
+                    .into_any_element();
+            }
+            FilesLoadState::Error(message) => {
+                return v_flex()
+                    .size_full()
+                    .items_center()
+                    .justify_center()
+                    .gap_3()
+                    .p_6()
+                    .child(div().w_full().h(px(200.)).child(ui::empty_state(
+                        AssetIcon::TriangleAlert,
+                        tr("files_preview.load_failed"),
+                        message.clone(),
+                        cx,
+                    )))
+                    .child(
+                        Button::new("retry-files")
+                            .icon(AssetIcon::RefreshCw)
+                            .label(tr("common.retry"))
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                if let Some(path) = view.last_loaded_path.take() {
+                                    view.trigger_load(path, window, cx);
+                                }
+                            })),
+                    )
+                    .into_any_element();
+            }
+            FilesLoadState::Loaded(_) => {}
+        }
         let tree_state = &self.tree_state;
         let view: Entity<FilesPreviewView> = cx.entity();
 
-        div()
-            .size_full()
+        v_flex()
+            .size_full().min_h_0().p_3()
+            .child(div().flex_1().min_h_0().rounded_lg().border_1().border_color(cx.theme().border)
+                .bg(cx.theme().background).overflow_hidden()
             .child(h_resizable("files-preview-split")
             .with_state(&self.resizable_state)
             // ── Left panel: file tree ─────────────────────────────────────
             .child(
                 resizable_panel()
-                    .size(px(240.))
+                    .size(px(260.))
                     .size_range(px(120.)..px(480.))
                     .child(
                         v_flex()
                             .size_full()
                             .border_r_1()
                             .border_color(cx.theme().border)
-                            .bg(cx.theme().sidebar)
+                            .bg(cx.theme().muted.opacity(0.2))
                             // Search Box
                             .child(
                                 div()
@@ -250,6 +354,7 @@ impl Render for FilesPreviewView {
                                     .child(
                                         Input::new(&self.search_state)
                                             .w_full()
+                                            .prefix(Icon::new(AssetIcon::Search).size_4())
                                             .cleanable(true)
                                     )
                             )
@@ -257,7 +362,11 @@ impl Render for FilesPreviewView {
                             .child(
                                 div()
                                     .flex_1()
+                                    .min_h_0()
                                     .overflow_hidden()
+                                    .when(self.visible_count == 0, |el| el.child(
+                                        div().p_4().text_sm().text_color(cx.theme().muted_foreground)
+                                            .child(tr("files_preview.no_match"))))
                                     .child(tree(tree_state, {
                                         move |ix, entry, selected, _window, _cx| {
                                             let item = entry.item();
@@ -330,7 +439,7 @@ impl Render for FilesPreviewView {
                             .child(self.render_preview(cx)),
                     ),
             )
-            )
+            )).into_any_element()
     }
 }
 
@@ -338,13 +447,13 @@ impl FilesPreviewView {
     fn render_preview(&mut self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let file = match &self.selected {
             None => {
-                return v_flex()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr("files_preview.select_left"))
-                    .into_any_element();
+                return ui::empty_state(
+                    AssetIcon::FileText,
+                    tr("files_preview.select_left"),
+                    String::new(),
+                    cx,
+                )
+                .into_any_element();
             }
             Some(file) => file.clone(),
         };
@@ -353,7 +462,7 @@ impl FilesPreviewView {
         let body: gpui_kit::AnyElement = match &file.kind {
             DebFileKind::Text => Editor::new(&self.editor_state)
                 .h_full()
-                .disabled(true)
+                .readonly(true)
                 .appearance(false)
                 .bg(cx.theme().background)
                 .into_any_element(),
@@ -370,13 +479,14 @@ impl FilesPreviewView {
             .size_full()
             .overflow_hidden()
             .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-            .child(Self::render_info_bar(&file, cx))
+            .child(self.render_info_bar(&file, cx))
             .into_any_element()
     }
 
     /// Status strip pinned to the bottom of the preview panel: the previewed
     /// member's archive path on the left, its size on the right.
-    fn render_info_bar(file: &DebFileEntry, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_info_bar(&self, file: &DebFileEntry, cx: &mut Context<Self>) -> impl IntoElement {
+        let path = file.path.clone();
         let size = SharedString::from(
             rust_i18n::t!("files_preview.file_size", size = format_size(file.size)).to_string(),
         );
@@ -394,14 +504,28 @@ impl FilesPreviewView {
             .border_color(cx.theme().border)
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .child(file.path.clone()),
-            )
+            .child(div().flex_1().min_w_0().truncate().child(file.path.clone()))
             .child(div().flex_shrink_0().child(size))
+            .child(
+                Button::new("copy-preview-path")
+                    .ghost()
+                    .small()
+                    .icon(if self.path_copied {
+                        AssetIcon::Check
+                    } else {
+                        AssetIcon::Copy
+                    })
+                    .tooltip(tr(if self.path_copied {
+                        "common.copied"
+                    } else {
+                        "files_preview.copy_path"
+                    }))
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
+                        view.path_copied = true;
+                        cx.notify();
+                    })),
+            )
     }
 }
 
@@ -425,14 +549,25 @@ async fn load_files_async(
         .await;
 
     // Ignore a completion after reset or selection of a different package.
-    let is_current = weak.read_with(cx, |view, _| {
-        view.last_loaded_path.as_ref() == Some(&loaded_path)
-    }).unwrap_or(false);
-    if !is_current { return; }
-    let callback = weak.read_with(cx, |view, _| view.on_categories_loaded.clone()).ok().flatten();
-    let categories = result.as_ref().map(|(_, categories)| categories.clone()).unwrap_or_default();
+    let is_current = weak
+        .read_with(cx, |view, _| {
+            view.last_loaded_path.as_ref() == Some(&loaded_path)
+        })
+        .unwrap_or(false);
+    if !is_current {
+        return;
+    }
+    let callback = weak
+        .read_with(cx, |view, _| view.on_categories_loaded.clone())
+        .ok()
+        .flatten();
+    let categories = result
+        .as_ref()
+        .map(|(_, categories)| categories.clone())
+        .unwrap_or_default();
     if let Some(callback) = callback {
-        cx.update(|window, cx| callback(loaded_path, categories, window, cx)).ok();
+        cx.update(|window, cx| callback(loaded_path, categories, window, cx))
+            .ok();
     }
 
     match result {
@@ -449,8 +584,15 @@ async fn load_files_async(
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(SharedString::from(rust_i18n::t!("files_preview.search_files", count = count).to_string()), w, c)
-                }).ok();
+                    s.set_placeholder(
+                        SharedString::from(
+                            rust_i18n::t!("files_preview.search_files", count = count).to_string(),
+                        ),
+                        w,
+                        c,
+                    )
+                })
+                .ok();
             }
         }
         Err(e) => {
@@ -458,15 +600,23 @@ async fn load_files_async(
             let err_msg = e.to_string();
 
             weak.update(cx, |view, cx| {
-                view.load_state = FilesLoadState::Error;
+                view.load_state = FilesLoadState::Error(err_msg.clone());
                 cx.notify();
             })
             .ok();
 
             if let Some(state) = search_state {
                 cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(SharedString::from(rust_i18n::t!("files_preview.error", err = err_msg.as_str()).to_string()), w, c)
-                }).ok();
+                    s.set_placeholder(
+                        SharedString::from(
+                            rust_i18n::t!("files_preview.error", err = err_msg.as_str())
+                                .to_string(),
+                        ),
+                        w,
+                        c,
+                    )
+                })
+                .ok();
             }
         }
     }
@@ -612,7 +762,11 @@ fn render_preview_unavailable(
         .into_any_element()
 }
 
-fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreviewView>) -> gpui_kit::AnyElement {
+fn render_image_preview(
+    path: &str,
+    bytes: &[u8],
+    _cx: &mut Context<FilesPreviewView>,
+) -> gpui_kit::AnyElement {
     let ext = std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -638,11 +792,7 @@ fn render_image_preview(path: &str, bytes: &[u8], _cx: &mut Context<FilesPreview
         .items_center()
         .justify_center()
         .p_4()
-        .child(
-            img(image)
-                .max_w_full()
-                .max_h_full(),
-        )
+        .child(img(image).max_w_full().max_h_full())
         .into_any_element()
 }
 

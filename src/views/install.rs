@@ -1,14 +1,19 @@
-use gpui_kit::{
-    App, AppContext, AsyncWindowContext, Context, Entity, Hsla, IntoElement, ListAlignment,
-    ListState, ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription,
-    VisualContext, WeakEntity, Window, div, list, prelude::FluentBuilder, px, rgb,
-};
+use super::ui;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    ActiveTheme, Disableable, Icon, Sizable, WindowExt,
+    button::{Button, ButtonVariant, ButtonVariants as _},
     checkbox::Checkbox,
-    h_flex, v_flex,
+    h_flex,
     input::{Input, InputEvent, InputState},
+    spinner::Spinner,
+    v_flex,
+};
+use gpui_kit::{
+    App, AppContext, AsyncWindowContext, ClipboardItem, Context, Entity, ExternalPaths,
+    InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement, PathPromptOptions,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, VisualContext,
+    WeakEntity, Window, div, list, prelude::FluentBuilder, px,
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -33,9 +38,19 @@ pub enum InstallState {
         /// Whether uninstalling this package should also purge its configuration.
         purge: bool,
     },
-    Installing { info: DebInfo, log: Vec<String> },
-    Uninstalling { pkg_name: String, log: Vec<String> },
-    Done { message: String, success: bool, log: Vec<String> },
+    Installing {
+        info: DebInfo,
+        log: Vec<String>,
+    },
+    Uninstalling {
+        pkg_name: String,
+        log: Vec<String>,
+    },
+    Done {
+        message: String,
+        success: bool,
+        log: Vec<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +74,8 @@ pub struct InstallView {
     state: InstallState,
     info_inputs: InfoInputs,
     auto_close: bool,
+    selecting_file: bool,
+    log_copied: bool,
     log_list_state: ListState,
     /// Application exposed by the package that was just installed, if any.
     ///
@@ -81,15 +98,33 @@ pub struct InstallView {
 
 impl InstallView {
     /// Updates menu categories only for the package still being displayed.
-    pub fn set_desktop_categories(&mut self, path: &std::path::Path, categories: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
-        if !matches!(&self.state, InstallState::FileSelected { path: current, .. } if current == path) {
+    pub fn set_desktop_categories(
+        &mut self,
+        path: &std::path::Path,
+        categories: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(&self.state, InstallState::FileSelected { path: current, .. } if current == path)
+        {
             return;
         }
-        let value = if categories.is_empty() { tr("install.unknown") } else { categories.join("; ") };
-        self.info_inputs.categories.update(cx, |s, cx| s.set_value(value, window, cx));
+        let value = if categories.is_empty() {
+            tr("install.unknown")
+        } else {
+            categories.join("; ")
+        };
+        self.info_inputs
+            .categories
+            .update(cx, |s, cx| s.set_value(value, window, cx));
     }
 
-    pub fn new(window: &mut Window, initial_deb_path: Option<PathBuf>, initial_auto_close: bool, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        window: &mut Window,
+        initial_deb_path: Option<PathBuf>,
+        initial_auto_close: bool,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let inputs = InfoInputs {
             name: cx.new(|cx| InputState::new(window, cx)),
             version: cx.new(|cx| InputState::new(window, cx)),
@@ -137,6 +172,8 @@ impl InstallView {
             state: InstallState::Idle,
             info_inputs: inputs,
             auto_close: initial_auto_close,
+            selecting_file: false,
+            log_copied: false,
             log_list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
             open_target: None,
             desktop_entries: None,
@@ -158,7 +195,22 @@ impl InstallView {
     // Actions
     // -----------------------------------------------------------------------
 
+    pub fn is_busy(&self) -> bool {
+        self.selecting_file
+            || matches!(
+                self.state,
+                InstallState::LoadingInfo(_)
+                    | InstallState::Installing { .. }
+                    | InstallState::Uninstalling { .. }
+            )
+    }
+
     fn load_deb_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_busy() {
+            return;
+        }
+        self.log_copied = false;
+        self.open_target = None;
         let path_str = path.to_string_lossy().to_string();
         self.state = InstallState::LoadingInfo(path.clone());
         cx.notify();
@@ -170,6 +222,11 @@ impl InstallView {
     }
 
     fn select_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_busy() || self.selecting_file {
+            return;
+        }
+        self.selecting_file = true;
+        cx.notify();
         cx.spawn_in(window, async move |weak, cx| {
             let receiver = cx
                 .update(|_window, cx| {
@@ -182,13 +239,22 @@ impl InstallView {
                 })
                 .ok();
 
-            let Some(receiver) = receiver else { return };
+            let result = if let Some(receiver) = receiver {
+                Some(receiver.await)
+            } else {
+                None
+            };
+            weak.update(cx, |view, cx| {
+                view.selecting_file = false;
+                cx.notify();
+            })
+            .ok();
 
-            match receiver.await {
-                Ok(Ok(Some(paths))) if !paths.is_empty() => {
+            match result {
+                Some(Ok(Ok(Some(paths)))) if !paths.is_empty() => {
                     let path = paths.into_iter().next().unwrap();
 
-                    if path.extension().and_then(|e| e.to_str()) != Some("deb") {
+                    if !is_deb_path(&path) {
                         weak.update(cx, |view, cx| {
                             view.state = InstallState::Done {
                                 message: tr("install.selected_not_deb").into(),
@@ -203,6 +269,8 @@ impl InstallView {
 
                     let path_str = path.to_string_lossy().to_string();
                     weak.update(cx, |view, cx| {
+                        view.log_copied = false;
+                        view.open_target = None;
                         view.state = InstallState::LoadingInfo(path.clone());
                         cx.notify();
                     })
@@ -222,7 +290,10 @@ impl InstallView {
             _ => return,
         };
 
-        self.state = InstallState::Installing { info: info.clone(), log: Vec::new() };
+        self.state = InstallState::Installing {
+            info: info.clone(),
+            log: Vec::new(),
+        };
         self.open_target = None;
         self.log_list_state.reset(0);
         cx.notify();
@@ -245,6 +316,7 @@ impl InstallView {
                 weak.update(cx, |view, cx| {
                     if let InstallState::Installing { ref mut log, .. } = view.state {
                         log.push(l);
+                        view.log_copied = false;
                         let last = log.len().saturating_sub(1);
                         view.log_list_state.splice(last..last, 1);
                         view.log_list_state.scroll_to_reveal_item(last);
@@ -271,7 +343,11 @@ impl InstallView {
                     let pkg_name = info.name.clone();
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: rust_i18n::t!("install.package_installed", pkg = pkg_name.as_str()).to_string(),
+                            message: rust_i18n::t!(
+                                "install.package_installed",
+                                pkg = pkg_name.as_str()
+                            )
+                            .to_string(),
                             success: true,
                             log: final_log,
                         };
@@ -314,6 +390,8 @@ impl InstallView {
                     weak.update(cx, |view, cx| {
                         let mut log = final_log;
                         log.push(e.to_string());
+                        view.log_list_state.reset(log.len());
+                        view.log_list_state.scroll_to_reveal_item(log.len() - 1);
                         view.state = InstallState::Done {
                             message: tr("install.installation_failed"),
                             success: false,
@@ -333,12 +411,61 @@ impl InstallView {
             InstallState::FileSelected { info, purge, .. } => (info.name.clone(), *purge),
             _ => return,
         };
-        self.start_uninstall_by_name(pkg_name, purge, window, cx);
+        let weak = cx.weak_entity();
+        window.open_alert_dialog(cx, move |dialog, _, cx| {
+            let name = pkg_name.clone();
+            let weak = weak.clone();
+            dialog
+                .confirm()
+                .title(tr("common.uninstall"))
+                .icon(
+                    Icon::new(IconName::TriangleAlert)
+                        .size_6()
+                        .text_color(cx.theme().danger),
+                )
+                .description(
+                    rust_i18n::t!("packages.remove_package_confirm", pkg = pkg_name.as_str())
+                        .to_string(),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(if purge {
+                            "install.purge_hint"
+                        } else {
+                            "install.remove_hint"
+                        })),
+                )
+                .ok_text(tr("packages.yes_remove"))
+                .ok_variant(ButtonVariant::Danger)
+                .cancel_text(tr("common.cancel"))
+                .on_ok(move |_, window, cx| {
+                    weak.update(cx, |view, cx| {
+                        view.start_uninstall_by_name(name.clone(), purge, window, cx)
+                    })
+                    .ok();
+                    true
+                })
+        });
     }
 
     /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
-    pub fn start_uninstall_by_name(&mut self, pkg_name: String, purge: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: Vec::new() };
+    pub fn start_uninstall_by_name(
+        &mut self,
+        pkg_name: String,
+        purge: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_busy() {
+            return;
+        }
+        self.log_copied = false;
+        self.state = InstallState::Uninstalling {
+            pkg_name: pkg_name.clone(),
+            log: Vec::new(),
+        };
         self.open_target = None;
         self.log_list_state.reset(0);
         cx.notify();
@@ -358,6 +485,7 @@ impl InstallView {
                 weak.update(cx, |view, cx| {
                     if let InstallState::Uninstalling { ref mut log, .. } = view.state {
                         log.push(l);
+                        view.log_copied = false;
                         let last = log.len().saturating_sub(1);
                         view.log_list_state.splice(last..last, 1);
                         view.log_list_state.scroll_to_reveal_item(last);
@@ -380,7 +508,11 @@ impl InstallView {
                 Ok(()) => {
                     weak.update(cx, |view, cx| {
                         view.state = InstallState::Done {
-                            message: rust_i18n::t!("install.package_uninstalled", pkg = pkg_name.as_str()).to_string(),
+                            message: rust_i18n::t!(
+                                "install.package_uninstalled",
+                                pkg = pkg_name.as_str()
+                            )
+                            .to_string(),
                             success: true,
                             log: final_log,
                         };
@@ -395,6 +527,8 @@ impl InstallView {
                     weak.update(cx, |view, cx| {
                         let mut log = final_log;
                         log.push(e.to_string());
+                        view.log_list_state.reset(log.len());
+                        view.log_list_state.scroll_to_reveal_item(log.len() - 1);
                         view.state = InstallState::Done {
                             message: tr("install.uninstall_failed"),
                             success: false,
@@ -412,6 +546,8 @@ impl InstallView {
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Idle;
         self.open_target = None;
+        self.log_copied = false;
+        self.log_list_state.reset(0);
         cx.notify();
         if let Some(cb) = self.on_reset.clone() {
             cb(window, cx);
@@ -440,6 +576,7 @@ impl InstallView {
 
     /// Reports a failed launch through the output panel the user is looking at.
     fn report_open_failure(&mut self, message: String, cx: &mut Context<Self>) {
+        self.log_copied = false;
         if let InstallState::Done { log, .. } = &mut self.state {
             log.push(rust_i18n::t!("install.open_app_failed", err = message).to_string());
             let last = log.len().saturating_sub(1);
@@ -456,7 +593,11 @@ impl InstallView {
                 if info.depends.is_empty() {
                     tr("install.no_dependencies_markdown")
                 } else {
-                    info.depends.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
+                    info.depends
+                        .iter()
+                        .map(|d| format!("- {}", d))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 }
             }
             _ => tr("install.dependencies_hint_markdown"),
@@ -470,18 +611,22 @@ impl InstallView {
 
 impl Render for InstallView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_file_selected = matches!(self.state, InstallState::FileSelected { .. });
         v_flex()
-            .when(!is_file_selected, |el| el.size_full())
-            .when(is_file_selected, |el| el.w_full())
-            .p_4()
+            .size_full()
+            .min_h_0()
+            .p_3()
             .gap_4()
             .child(match &self.state {
-                InstallState::Idle => render_idle(cx),
+                InstallState::Idle => render_idle(self.selecting_file, cx),
                 InstallState::LoadingInfo(path) => {
-                    render_loading_info(path.to_string_lossy().to_string())
+                    render_loading_info(path.to_string_lossy().to_string(), cx)
                 }
-                InstallState::FileSelected { path, info, installed_version, purge } => {
+                InstallState::FileSelected {
+                    path,
+                    info,
+                    installed_version,
+                    purge,
+                } => {
                     let path_s = path.to_string_lossy().to_string();
                     let iv = installed_version.clone();
                     let auto_close = self.auto_close;
@@ -497,6 +642,7 @@ impl Render for InstallView {
                         None,
                         None,
                         list_state,
+                        self.log_copied,
                         cx,
                     )
                 }
@@ -508,13 +654,26 @@ impl Render for InstallView {
                         None,
                         None,
                         list_state,
+                        self.log_copied,
                         cx,
                     )
                 }
-                InstallState::Done { message, success, log } => {
+                InstallState::Done {
+                    message,
+                    success,
+                    log,
+                } => {
                     let list_state = self.log_list_state.clone();
                     let open_target = self.open_target.clone();
-                    render_with_log("", log, Some((*success, message.clone())), open_target, list_state, cx)
+                    render_with_log(
+                        "",
+                        log,
+                        Some((*success, message.clone())),
+                        open_target,
+                        list_state,
+                        self.log_copied,
+                        cx,
+                    )
                 }
             })
     }
@@ -524,33 +683,81 @@ impl Render for InstallView {
 // Sub-renderers
 // ---------------------------------------------------------------------------
 
-fn render_idle(cx: &mut Context<InstallView>) -> gpui_kit::AnyElement {
+fn is_deb_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("deb"))
+}
+
+fn render_idle(selecting: bool, cx: &mut Context<InstallView>) -> gpui_kit::AnyElement {
     v_flex()
-        .flex_1()
+        .id("package-drop-zone")
+        .size_full()
+        .min_h_0()
         .items_center()
         .justify_center()
-        .gap_4()
+        .gap_5()
+        .rounded_xl()
+        .border_1()
+        .border_dashed()
+        .border_color(cx.theme().border)
+        .bg(cx.theme().background)
+        .drag_over::<ExternalPaths>(|style, _, _, cx| {
+            style
+                .bg(cx.theme().primary.opacity(0.06))
+                .border_color(cx.theme().primary)
+        })
+        .on_drop(cx.listener(|view, paths: &ExternalPaths, window, cx| {
+            if view.is_busy() {
+                return;
+            }
+            if paths.paths().len() == 1 {
+                let path = &paths.paths()[0];
+                if is_deb_path(path) {
+                    view.load_deb_file(path.clone(), window, cx);
+                } else {
+                    view.state = InstallState::Done {
+                        message: tr("install.selected_not_deb"),
+                        success: false,
+                        log: Vec::new(),
+                    };
+                    cx.notify();
+                }
+            }
+        }))
+        .child(ui::icon_tile(IconName::PackageOpen, cx))
         .child(
-            div()
-                .w(gpui_kit::px(340.))
-                .h(gpui_kit::px(180.))
-                .border_2()
-                .border_dashed()
-                .border_color(cx.theme().border)
-                .rounded_lg()
-                .flex()
+            v_flex()
                 .items_center()
-                .justify_center()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr("install.idle_hint")),
+                .gap_2()
+                .child(
+                    div()
+                        .text_2xl()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child(tr("install.welcome")),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr("install.idle_hint")),
+                ),
         )
         .child(
             Button::new("select-file")
                 .primary()
+                .icon(IconName::FolderOpen)
                 .label(tr("install.select_deb_file"))
-                .on_click(cx.listener(|view, _ev, window, cx| {
-                    view.select_file(window, cx);
-                })),
+                .loading(selecting)
+                .on_click(cx.listener(|view, _, window, cx| view.select_file(window, cx))),
+        )
+        .child(
+            h_flex()
+                .gap_2()
+                .text_xs()
+                .text_color(cx.theme().muted_foreground)
+                .child(Icon::new(IconName::ShieldCheck).size_4())
+                .child(tr("install.inspect_hint")),
         )
         .into_any_element()
 }
@@ -637,22 +844,37 @@ async fn load_deb_async(
                 } else {
                     tr("install.unknown")
                 };
-                let sect_v = info.section.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| tr("install.unknown"));
+                let sect_v = info
+                    .section
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| tr("install.unknown"));
 
-                cx.update_window_entity(&ne, |s, w, cx| s.set_value(name_v, w, cx)).ok();
-                cx.update_window_entity(&ve, |s, w, cx| s.set_value(ver_v, w, cx)).ok();
-                cx.update_window_entity(&pe, |s, w, cx| s.set_value(path_v, w, cx)).ok();
-                cx.update_window_entity(&de, |s, w, cx| s.set_value(desc_v, w, cx)).ok();
-                cx.update_window_entity(&me, |s, w, cx| s.set_value(maint_v, w, cx)).ok();
-                cx.update_window_entity(&se, |s, w, cx| s.set_value(size_v, w, cx)).ok();
-                cx.update_window_entity(&ste, |s, w, cx| s.set_value(sect_v, w, cx)).ok();
-                cx.update_window_entity(&ce, |s, w, cx| s.set_value(tr("files_preview.loading"), w, cx)).ok();
+                cx.update_window_entity(&ne, |s, w, cx| s.set_value(name_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&ve, |s, w, cx| s.set_value(ver_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&pe, |s, w, cx| s.set_value(path_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&de, |s, w, cx| s.set_value(desc_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&me, |s, w, cx| s.set_value(maint_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&se, |s, w, cx| s.set_value(size_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&ste, |s, w, cx| s.set_value(sect_v, w, cx))
+                    .ok();
+                cx.update_window_entity(&ce, |s, w, cx| {
+                    s.set_value(tr("files_preview.loading"), w, cx)
+                })
+                .ok();
             }
         }
         Err(e) => {
             weak.update(cx, |view, cx| {
                 view.state = InstallState::Done {
-                    message: rust_i18n::t!("install.read_deb_failed", err = e.to_string()).to_string(),
+                    message: rust_i18n::t!("install.read_deb_failed", err = e.to_string())
+                        .to_string(),
                     success: false,
                     log: Vec::new(),
                 };
@@ -663,14 +885,27 @@ async fn load_deb_async(
     }
 }
 
-fn render_loading_info(path: String) -> gpui_kit::AnyElement {
+fn render_loading_info(path: String, cx: &App) -> gpui_kit::AnyElement {
     v_flex()
-        .flex_1()
+        .size_full()
         .items_center()
         .justify_center()
-        .gap_2()
-        .child(div().child(tr("install.reading_package_info")))
-        .child(div().text_sm().child(path))
+        .gap_3()
+        .p_6()
+        .child(Spinner::new().large().color(cx.theme().primary))
+        .child(
+            div()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(tr("install.reading_package_info")),
+        )
+        .child(
+            div()
+                .max_w_full()
+                .truncate()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(path),
+        )
         .into_any_element()
 }
 
@@ -685,7 +920,11 @@ fn render_file_selected(
 ) -> gpui_kit::AnyElement {
     // Determine install status label and button label
     let (status_text, status_color, install_label) = match &installed_version {
-        None => (tr("install.status.not_installed"), None, tr("install.action.install")),
+        None => (
+            tr("install.status.not_installed"),
+            None,
+            tr("install.action.install"),
+        ),
         Some(v) => match crate::utils::dpkg::compare_versions(v, &info.version) {
             std::cmp::Ordering::Equal => (
                 rust_i18n::t!("install.status.already_installed", version = v.as_str()).to_string(),
@@ -693,166 +932,221 @@ fn render_file_selected(
                 tr("install.action.reinstall"),
             ),
             std::cmp::Ordering::Less => (
-                rust_i18n::t!("install.status.upgrade", from = v.as_str(), to = info.version.as_str()).to_string(),
+                rust_i18n::t!(
+                    "install.status.upgrade",
+                    from = v.as_str(),
+                    to = info.version.as_str()
+                )
+                .to_string(),
                 Some("success"),
                 tr("install.action.upgrade"),
             ),
             std::cmp::Ordering::Greater => (
-                rust_i18n::t!("install.status.downgrade", from = v.as_str(), to = info.version.as_str()).to_string(),
+                rust_i18n::t!(
+                    "install.status.downgrade",
+                    from = v.as_str(),
+                    to = info.version.as_str()
+                )
+                .to_string(),
                 Some("danger"),
                 tr("install.action.downgrade"),
             ),
         },
     };
 
+    let status_color = match status_color {
+        Some("warning") => cx.theme().warning,
+        Some("success") => cx.theme().success,
+        Some("danger") => cx.theme().danger,
+        _ => cx.theme().muted_foreground,
+    };
+
     v_flex()
-        .gap_3()
+        .size_full()
+        .min_h_0()
+        .gap_2()
         .child(
-            v_flex()
-                .p_4()
-                .gap_2()
+            h_flex()
+                .flex_shrink_0()
+                .p_3()
+                .gap_3()
                 .rounded_lg()
                 .border_1()
                 .border_color(cx.theme().border)
-                .bg(cx.theme().colors.list)
-                // Package name + version row (header — kept as bold display text)
+                .bg(cx.theme().background)
                 .child(
                     h_flex()
-                        .gap_3()
+                        .size(px(32.))
+                        .flex_shrink_0()
                         .items_center()
+                        .justify_center()
+                        .rounded_md()
+                        .bg(cx.theme().primary.opacity(0.10))
+                        .text_color(cx.theme().primary)
+                        .child(Icon::new(IconName::Package).size_5()),
+                )
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
                         .child(
                             div()
-                                .text_xl()
-                                .font_weight(gpui_kit::FontWeight::BOLD)
+                                .text_lg()
+                                .truncate()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .child(info.name.clone()),
                         )
                         .child(
                             div()
+                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("v{} ({})", info.version, info.architecture)),
-                        )
-                        // Installation status badge
-                        .child(
-                            div()
-                                .px_2()
-                                .py_1()
-                                .rounded_md()
-                                .text_sm()
-                                .map(|el| match status_color {
-                                    Some("warning") => el
-                                        .bg(cx.theme().warning.opacity(0.15))
-                                        .border_1()
-                                        .border_color(cx.theme().warning)
-                                        .text_color(cx.theme().warning),
-                                    Some("info") => el
-                                        .bg(cx.theme().info.opacity(0.15))
-                                        .border_1()
-                                        .border_color(cx.theme().info)
-                                        .text_color(cx.theme().info),
-                                    Some("success") => el
-                                        .bg(cx.theme().success.opacity(0.15))
-                                        .border_1()
-                                        .border_color(cx.theme().success)
-                                        .text_color(cx.theme().success),
-                                    Some("danger") => el
-                                        .bg(cx.theme().danger.opacity(0.15))
-                                        .border_1()
-                                        .border_color(cx.theme().danger)
-                                        .text_color(cx.theme().danger),
-                                    _ => el
-                                        .bg(cx.theme().muted.opacity(0.3))
-                                        .border_1()
-                                        .border_color(cx.theme().border)
-                                        .text_color(cx.theme().muted_foreground),
-                                })
-                                .child(status_text),
+                                .child(format!("{} · {}", info.version, info.architecture)),
                         ),
                 )
-                .child(div().h(gpui_kit::px(1.)).bg(cx.theme().border))
-                // Selectable info rows
-                .child(info_row_input(tr("install.field.package"), &inputs.name, cx))
-                .child(info_row_input(tr("install.field.version"), &inputs.version, cx))
+                .child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .max_w(px(260.))
+                        .gap_2()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(status_color.opacity(0.08))
+                        .text_color(status_color)
+                        .text_xs()
+                        .child(Icon::new(IconName::Info).size_4())
+                        .child(status_text),
+                ),
+        )
+        .child(
+            v_flex()
+                .id("package-details")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .p_4()
+                .gap_1()
+                .rounded_lg()
+                .border_1()
+                .border_color(cx.theme().border)
+                .bg(cx.theme().background)
+                .child(info_row_input(
+                    tr("install.field.package"),
+                    &inputs.name,
+                    cx,
+                ))
+                .child(info_row_input(
+                    tr("install.field.version"),
+                    &inputs.version,
+                    cx,
+                ))
                 .child(info_row_input(tr("install.field.file"), &inputs.path, cx))
-                .child(info_row_input(tr("install.field.description"), &inputs.description, cx))
-                .child(info_row_input(tr("install.field.maintainer"), &inputs.maintainer, cx))
-                .child(info_row_input(tr("install.field.installed_size"), &inputs.size, cx))
-                .child(info_row_input(tr("install.field.section"), &inputs.section, cx))
-                .child(info_row_input(tr("install.field.categories"), &inputs.categories, cx)),
+                .child(info_row_input(
+                    tr("install.field.description"),
+                    &inputs.description,
+                    cx,
+                ))
+                .child(info_row_input(
+                    tr("install.field.maintainer"),
+                    &inputs.maintainer,
+                    cx,
+                ))
+                .child(info_row_input(
+                    tr("install.field.installed_size"),
+                    &inputs.size,
+                    cx,
+                ))
+                .child(info_row_input(
+                    tr("install.field.section"),
+                    &inputs.section,
+                    cx,
+                ))
+                .child(info_row_input(
+                    tr("install.field.categories"),
+                    &inputs.categories,
+                    cx,
+                )),
         )
         .child(
             h_flex()
+                .flex_shrink_0()
                 .gap_3()
+                .p_2()
+                .rounded_lg()
+                .bg(cx.theme().background)
+                .border_1()
+                .border_color(cx.theme().border)
                 .child(
-                    Button::new("install-btn")
-                        .primary()
-                        .label(install_label)
-                        .on_click(cx.listener(|view, _ev, window, cx| {
-                            view.install_package(window, cx);
-                        })),
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Checkbox::new("auto-close-cb")
+                                .label(tr("install.action.auto_close"))
+                                .checked(auto_close)
+                                .on_click(cx.listener(|view, checked: &bool, _, cx| {
+                                    view.auto_close = *checked;
+                                    let mut cfg = AppConfig::load();
+                                    cfg.auto_close = *checked;
+                                    cfg.save();
+                                    cx.notify();
+                                })),
+                        )
+                        .when(installed_version.is_some(), |el| {
+                            el.child(
+                                Checkbox::new("purge-config")
+                                    .label(tr("common.purge_config"))
+                                    .checked(purge)
+                                    .on_click(cx.listener(|view, checked: &bool, _, cx| {
+                                        if let InstallState::FileSelected { purge, .. } =
+                                            &mut view.state
+                                        {
+                                            *purge = *checked;
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                        }),
                 )
-                // Show uninstall button only when already installed
-                .when(installed_version.is_some(), |el| {
-                    el.child(
-                        Button::new("uninstall-btn")
-                            .danger()
-                            .label(tr("install.action.uninstall"))
-                            .on_click(cx.listener(|view, _ev, window, cx| {
-                                view.uninstall_package(window, cx);
-                            })),
-                    )
-                })
                 .child(
-                    Button::new("cancel-btn")
-                        .label(tr("install.action.cancel"))
-                        .on_click(cx.listener(|view, _ev, window, cx| {
-                            view.reset(window, cx);
-                        })),
-                )
-                .child(
-                    div().flex_1()
-                )
-                .child(
-                    Checkbox::new("auto-close-cb")
-                        .label(tr("install.action.auto_close"))
-                        .checked(auto_close)
-                        .on_click(cx.listener(|view, checked: &bool, _window, _cx| {
-                            view.auto_close = *checked;
-                            let mut cfg = AppConfig::load();
-                            cfg.auto_close = *checked;
-                            cfg.save();
-                        })),
+                    h_flex()
+                        .flex_shrink_0()
+                        .gap_2()
+                        .child(
+                            Button::new("cancel-btn")
+                                .ghost()
+                                .icon(IconName::ArrowLeft)
+                                .label(tr("install.action.cancel"))
+                                .on_click(
+                                    cx.listener(|view, _, window, cx| view.reset(window, cx)),
+                                ),
+                        )
+                        .when(installed_version.is_some(), |el| {
+                            el.child(
+                                Button::new("uninstall-btn")
+                                    .danger()
+                                    .outline()
+                                    .icon(IconName::Trash)
+                                    .label(tr("install.action.uninstall"))
+                                    .on_click(cx.listener(|view, _, window, cx| {
+                                        view.uninstall_package(window, cx)
+                                    })),
+                            )
+                        })
+                        .child(
+                            Button::new("install-btn")
+                                .primary()
+                                .icon(IconName::Download)
+                                .label(install_label)
+                                .on_click(cx.listener(|view, _, window, cx| {
+                                    view.install_package(window, cx)
+                                })),
+                        ),
                 ),
         )
-        .when(installed_version.is_some(), |el| {
-            el.child(
-                Checkbox::new("purge-config")
-                    .label(tr("common.purge_config"))
-                    .checked(purge)
-                    .on_click(cx.listener(|view, checked: &bool, _window, cx| {
-                        if let InstallState::FileSelected { purge, .. } = &mut view.state {
-                            *purge = *checked;
-                        }
-                        cx.notify();
-                    })),
-            )
-        })
         .into_any_element()
-}
-
-/// Accent blue of the "Open App" action, given as `#2590fc`.
-const OPEN_APP_BLUE: u32 = 0x2590fc;
-
-/// Button style painted in [`OPEN_APP_BLUE`].
-///
-/// The theme has no token for this exact hue, so the interaction shades are
-/// derived from it: lighter on hover, darker while pressed.
-fn open_app_button_variant(cx: &App) -> ButtonCustomVariant {
-    let base = Hsla::from(rgb(OPEN_APP_BLUE));
-    ButtonCustomVariant::new(cx)
-        .color(base)
-        .foreground(gpui_kit::white())
-        .hover(Hsla { l: (base.l + 0.07).min(1.0), ..base })
-        .active(Hsla { l: (base.l - 0.07).max(0.0), ..base })
 }
 
 /// Unified renderer for the in-progress and done states.
@@ -867,14 +1161,14 @@ fn render_with_log(
     done: Option<(bool, String)>,
     open_target: Option<AppTarget>,
     list_state: ListState,
+    copied: bool,
     cx: &mut Context<InstallView>,
 ) -> gpui_kit::AnyElement {
     let is_done = done.is_some();
-    let open_app_variant = open_app_button_variant(cx);
 
     // Build owned lines for the closure
     let lines: Vec<SharedString> = if log.is_empty() {
-        vec![SharedString::from(tr("install.waiting_auth"))]
+        Vec::new()
     } else {
         log.iter().map(|l| SharedString::from(l.clone())).collect()
     };
@@ -884,11 +1178,16 @@ fn render_with_log(
 
     v_flex()
         .flex_1()
+        .min_h_0()
         .gap_3()
         // Header: result banner when done, plain title when in-progress
         .child(match done {
             Some((success, message)) => {
-                let border_color = if success { cx.theme().success } else { cx.theme().danger };
+                let border_color = if success {
+                    cx.theme().success
+                } else {
+                    cx.theme().danger
+                };
                 h_flex()
                     .px_4()
                     .py_3()
@@ -896,12 +1195,23 @@ fn render_with_log(
                     .items_center()
                     .rounded_lg()
                     .border_1()
-                    .border_color(border_color)
-                    .child(div().flex_1().child(message))
+                    .border_color(border_color.opacity(0.35))
+                    .bg(border_color.opacity(0.08))
+                    .child(
+                        Icon::new(if success {
+                            IconName::CircleCheck
+                        } else {
+                            IconName::CircleAlert
+                        })
+                        .size_6()
+                        .text_color(border_color),
+                    )
+                    .child(div().flex_1().min_w_0().child(message))
                     .when_some(open_target, |el, target| {
                         el.child(
                             Button::new("open-app-btn")
-                                .custom(open_app_variant)
+                                .primary()
+                                .icon(IconName::ExternalLink)
                                 .label(tr("install.action.open_app"))
                                 .on_click(cx.listener(move |view, _ev, _window, cx| {
                                     view.open_installed_app(&target, cx);
@@ -910,56 +1220,125 @@ fn render_with_log(
                     })
                     .into_any_element()
             }
-            None => div()
-                .text_color(theme_fg)
-                .font_weight(gpui_kit::FontWeight::BOLD)
-                .child(title.to_string())
+            None => h_flex()
+                .flex_shrink_0()
+                .p_4()
+                .gap_3()
+                .rounded_lg()
+                .bg(cx.theme().primary.opacity(0.06))
+                .child(Spinner::new().color(cx.theme().primary))
+                .child(
+                    v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                .child(title.to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme_muted)
+                                .child(tr("install.progress_hint")),
+                        ),
+                )
                 .into_any_element(),
         })
         // Log panel
         .child(
             v_flex()
                 .flex_1()
+                .min_h_0()
                 .rounded_lg()
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().background)
                 .overflow_hidden()
                 .child(
-                    div()
+                    h_flex()
+                        .flex_shrink_0()
                         .px_3()
                         .py_2()
-                        .bg(cx.theme().tab_bar)
+                        .gap_2()
+                        .bg(cx.theme().muted.opacity(0.5))
                         .border_b_1()
                         .border_color(cx.theme().border)
                         .text_sm()
                         .text_color(cx.theme().muted_foreground)
-                        .child(tr("install.output")),
+                        .child(Icon::new(IconName::Terminal).size_4())
+                        .child(tr("install.output"))
+                        .child(div().flex_1())
+                        .child(
+                            Button::new("copy-output")
+                                .ghost()
+                                .small()
+                                .icon(if copied {
+                                    IconName::Check
+                                } else {
+                                    IconName::Copy
+                                })
+                                .label(tr(if copied {
+                                    "common.copied"
+                                } else {
+                                    "install.copy_output"
+                                }))
+                                .disabled(log.is_empty())
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    let output = match &view.state {
+                                        InstallState::Installing { log, .. }
+                                        | InstallState::Uninstalling { log, .. }
+                                        | InstallState::Done { log, .. } => log.join("\n"),
+                                        _ => String::new(),
+                                    };
+                                    cx.write_to_clipboard(ClipboardItem::new_string(output));
+                                    view.log_copied = true;
+                                    cx.notify();
+                                })),
+                        ),
                 )
                 .child(
-                    div().flex_1().overflow_hidden().child(
-                        list(list_state, move |ix, _window, _cx| {
-                            let line = lines.get(ix).cloned().unwrap_or_default();
-                            div()
-                                .px_3()
-                                .py(px(1.))
-                                .text_sm()
-                                .font_family("monospace")
-                                .text_color(if line.is_empty() { theme_muted } else { theme_fg })
-                                .child(line)
-                                .into_any_element()
-                        })
+                    div()
                         .flex_1()
-                        .w_full()
-                        .h_full(),
-                    ),
+                        .min_h_0()
+                        .overflow_hidden()
+                        .when(log.is_empty(), |el| {
+                            el.child(div().p_4().text_sm().text_color(theme_muted).child(tr(
+                                if is_done {
+                                    "install.no_output"
+                                } else {
+                                    "install.waiting_auth"
+                                },
+                            )))
+                        })
+                        .when(!log.is_empty(), |el| {
+                            el.child(
+                                list(list_state, move |ix, _window, _cx| {
+                                    let line = lines.get(ix).cloned().unwrap_or_default();
+                                    div()
+                                        .px_3()
+                                        .py(px(1.))
+                                        .text_sm()
+                                        .font_family("monospace")
+                                        .text_color(if line.is_empty() {
+                                            theme_muted
+                                        } else {
+                                            theme_fg
+                                        })
+                                        .child(line)
+                                        .into_any_element()
+                                })
+                                .flex_1()
+                                .w_full()
+                                .h_full(),
+                            )
+                        }),
                 ),
         )
         // Back button appears only after completion
         .when(is_done, |el| {
             el.child(
                 Button::new("reset-btn")
-                    .primary()
+                    .icon(IconName::ArrowLeft)
                     .label(tr("install.action.back"))
                     .on_click(cx.listener(|view, _ev, window, cx| {
                         view.reset(window, cx);
@@ -970,7 +1349,7 @@ fn render_with_log(
 }
 
 /// Renders a label + selectable Input value row.
-/// The Input is disabled (read-only) and has no visible appearance,
+/// The Input is read-only and has no visible appearance,
 /// so it looks like plain text but supports mouse selection and Ctrl+C.
 fn info_row_input(
     label: String,
@@ -980,12 +1359,18 @@ fn info_row_input(
     h_flex()
         .gap_2()
         .items_center()
+        .text_sm()
         .child(
             div()
-                .w(gpui_kit::px(130.))
+                .w(gpui_kit::px(120.))
                 .text_color(cx.theme().muted_foreground)
                 .flex_shrink_0()
                 .child(label),
         )
-        .child(div().flex_1().child(Input::new(input).disabled(true).appearance(false)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(Input::new(input).small().readonly(true).appearance(false)),
+        )
 }

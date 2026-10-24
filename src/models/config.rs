@@ -12,8 +12,12 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    fn default_width() -> f32 { 800. }
-    fn default_height() -> f32 { 520. }
+    fn default_width() -> f32 {
+        960.
+    }
+    fn default_height() -> f32 {
+        680.
+    }
 
     fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("gpui-deb-installer").join("config.json"))
@@ -29,7 +33,9 @@ impl AppConfig {
     }
 
     pub fn save(&self) {
-        let Some(path) = Self::config_path() else { return };
+        let Some(path) = Self::config_path() else {
+            return;
+        };
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }

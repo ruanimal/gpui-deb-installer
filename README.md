@@ -9,6 +9,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 
 ## Features ✨
 
+- **Refined workspace** — theme-aware cards, a single compact navigation bar and a scrollable detail panel with pinned install actions. Package status sits beside the summary, and file previews open directly without repeated page headings. Drop one `.deb` onto the welcome screen to open it; copy operation output and preview paths with one click. File previews include loading, empty, error and retry states. Redesigned parcel artwork gives the desktop icon and in-app identity the same indigo palette. A toolbar control switches between light and dark themes; uninstalling from package details now asks for confirmation.
 - **Fast and fluid** — GPU-accelerated rendering via GPUI keeps the UI instantly responsive.
 - **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
 - **Distinct categories** — package section (`Section`) and desktop app categories (`Categories`) are shown separately. App categories come from visible application entries inside the selected `.deb`; multiple entries are merged and deduplicated, and missing categories are shown as unknown.
