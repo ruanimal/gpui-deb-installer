@@ -6,6 +6,7 @@
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)
+![Screenshot3](screenshot3.png)
 
 ## 特性 ✨
 

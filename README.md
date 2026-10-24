@@ -6,6 +6,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)
+![Screenshot3](screenshot3.png)
 
 ## Features ✨
 
