@@ -74,6 +74,8 @@ pub struct InstallView {
     state: InstallState,
     info_inputs: InfoInputs,
     auto_close: bool,
+    /// Invalidates pending automatic exits without changing the saved preference.
+    auto_close_generation: u64,
     selecting_file: bool,
     log_copied: bool,
     log_list_state: ListState,
@@ -172,6 +174,7 @@ impl InstallView {
             state: InstallState::Idle,
             info_inputs: inputs,
             auto_close: initial_auto_close,
+            auto_close_generation: 0,
             selecting_file: false,
             log_copied: false,
             log_list_state: ListState::new(0, ListAlignment::Top, px(1000.)),
@@ -195,6 +198,11 @@ impl InstallView {
     // Actions
     // -----------------------------------------------------------------------
 
+    /// Cancels automatic closing for the current operation, including its countdown.
+    pub fn cancel_auto_close(&mut self) {
+        self.auto_close_generation = self.auto_close_generation.wrapping_add(1);
+    }
+
     pub fn is_busy(&self) -> bool {
         self.selecting_file
             || matches!(
@@ -209,6 +217,7 @@ impl InstallView {
         if self.is_busy() {
             return;
         }
+        self.cancel_auto_close();
         self.log_copied = false;
         self.open_target = None;
         let path_str = path.to_string_lossy().to_string();
@@ -290,6 +299,8 @@ impl InstallView {
             _ => return,
         };
 
+        self.cancel_auto_close();
+        let auto_close_generation = self.auto_close_generation;
         self.state = InstallState::Installing {
             info: info.clone(),
             log: Vec::new(),
@@ -383,7 +394,14 @@ impl InstallView {
                         cx.background_executor()
                             .timer(std::time::Duration::from_secs(10))
                             .await;
-                        cx.update(|_window, cx| cx.quit()).ok();
+                        weak.update(cx, |view, cx| {
+                            if view.auto_close_generation == auto_close_generation
+                                && matches!(view.state, InstallState::Done { success: true, .. })
+                            {
+                                cx.quit();
+                            }
+                        })
+                        .ok();
                     }
                 }
                 Err(e) => {
@@ -472,6 +490,7 @@ impl InstallView {
         if self.is_busy() || pkg_names.is_empty() {
             return;
         }
+        self.cancel_auto_close();
         self.log_copied = false;
         self.state = InstallState::Uninstalling {
             pkg_names: pkg_names.clone(),
@@ -564,6 +583,7 @@ impl InstallView {
     }
 
     fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_auto_close();
         self.state = InstallState::Idle;
         self.open_target = None;
         self.log_copied = false;

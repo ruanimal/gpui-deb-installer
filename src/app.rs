@@ -267,6 +267,11 @@ impl Render for AppView {
                                             )
                                         })
                                         .on_click(cx.listener(move |view, _, _, cx| {
+                                            if view.active_tab != index {
+                                                view.install_view.update(cx, |install, _| {
+                                                    install.cancel_auto_close();
+                                                });
+                                            }
                                             view.active_tab = index;
                                             cx.notify();
                                         }))
