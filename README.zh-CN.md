@@ -2,7 +2,7 @@
 
 **中文** | [English](README.md)
 
-一个使用 [GPUI](https://www.gpui.rs/) 框架编写的高性能、轻量级图形化 `.deb` 软件包安装器。
+一个使用 [GPUI](https://www.gpui.rs/) 框架（`gpui-kit 0.7.3`）编写的高性能、轻量级图形化 `.deb` 软件包安装器。
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)

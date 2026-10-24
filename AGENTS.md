@@ -1,6 +1,6 @@
 # AGENTS.md
 
-GPUI 编写的图形化 `.deb` 安装器（Linux only，Debian 系）。UI 框架为 `gpui-kit 0.6.2`，Rust edition 2024。
+GPUI 编写的图形化 `.deb` 安装器（Linux only，Debian 系）。UI 框架为 `gpui-kit 0.7.3`，Rust edition 2024。
 
 ## 常用命令
 

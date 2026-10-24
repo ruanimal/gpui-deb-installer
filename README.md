@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | **English**
 
-A fast, lightweight graphical installer for `.deb` packages, built with the [GPUI](https://www.gpui.rs/) framework.
+A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](https://www.gpui.rs/) through `gpui-kit 0.7.3`.
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)

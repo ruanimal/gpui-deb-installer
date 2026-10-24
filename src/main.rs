@@ -10,7 +10,6 @@ use gpui_kit::{
     App, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size,
 };
 use gpui_kit::assets::Assets;
-use gpui_kit::component::Root;
 use std::path::PathBuf;
 
 use app::AppView;
@@ -44,7 +43,7 @@ fn main() {
             let bounds = Bounds::centered(None, size(px(config.width), px(config.height)), cx);
             let initial_auto_close = config.auto_close;
 
-            let _window = cx.open_window(
+            let _window = gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
@@ -56,6 +55,7 @@ fn main() {
                     app_id: Some("gpui-deb-installer".to_string()),
                     ..Default::default()
                 },
+                cx,
                 |window, cx| {
                     // Save window size + settings when the user closes the window
                     window.on_window_should_close(cx, |window, _cx| {
@@ -68,9 +68,7 @@ fn main() {
                         true
                     });
 
-                    let app_view = cx.new(|cx| AppView::new(window, deb_path.clone(), initial_auto_close, cx));
-                    let app_view: gpui_kit::AnyView = app_view.into();
-                    cx.new(|cx| Root::new(app_view, window, cx))
+                    cx.new(|cx| AppView::new(window, deb_path.clone(), initial_auto_close, cx))
                 },
             )
             .unwrap();
