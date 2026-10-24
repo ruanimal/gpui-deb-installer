@@ -19,6 +19,8 @@ use gpui_kit::assets::IconName;
 
 pub struct AppView {
     active_tab: usize,
+    /// Tab that opened the uninstall log, consumed when the user returns.
+    uninstall_return_tab: Option<usize>,
     install_view: Entity<InstallView>,
     packages_view: Entity<PackagesView>,
     files_preview_view: Entity<FilesPreviewView>,
@@ -65,6 +67,7 @@ impl AppView {
                 view.on_tab_switch = Some(Arc::new(move |cx: &mut App| {
                     app_weak
                         .update(cx, |app, cx| {
+                            app.uninstall_return_tab = Some(app.active_tab);
                             app.active_tab = 0;
                             cx.notify();
                         })
@@ -136,15 +139,24 @@ impl AppView {
             });
         }
 
-        // When the install_view resets, clear the files preview.
+        // Clear the preview and return to the tab that initiated uninstall.
         {
             let files_weak = files_preview_view.downgrade();
+            let app_weak = cx.weak_entity();
             install_view.update(cx, |view, _cx| {
                 view.on_reset = Some(Arc::new(move |window: &mut Window, cx: &mut App| {
                     window.set_window_title(&tr("app.name"));
                     files_weak
                         .update(cx, |fv, cx| {
                             fv.reset(window, cx);
+                        })
+                        .ok();
+                    app_weak
+                        .update(cx, |app, cx| {
+                            if let Some(tab) = app.uninstall_return_tab.take() {
+                                app.active_tab = tab;
+                                cx.notify();
+                            }
                         })
                         .ok();
                 }));
@@ -170,6 +182,7 @@ impl AppView {
 
         Self {
             active_tab: 0,
+            uninstall_return_tab: None,
             install_view,
             packages_view,
             files_preview_view,
