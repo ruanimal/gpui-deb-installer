@@ -30,6 +30,8 @@ pub enum InstallState {
         info: DebInfo,
         /// Version already installed on the system, if any.
         installed_version: Option<String>,
+        /// Whether uninstalling this package should also purge its configuration.
+        purge: bool,
     },
     Installing { info: DebInfo, log: Vec<String> },
     Uninstalling { pkg_name: String, log: Vec<String> },
@@ -327,15 +329,15 @@ impl InstallView {
     }
 
     fn uninstall_package(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pkg_name = match &self.state {
-            InstallState::FileSelected { info, .. } => info.name.clone(),
+        let (pkg_name, purge) = match &self.state {
+            InstallState::FileSelected { info, purge, .. } => (info.name.clone(), *purge),
             _ => return,
         };
-        self.start_uninstall_by_name(pkg_name, window, cx);
+        self.start_uninstall_by_name(pkg_name, purge, window, cx);
     }
 
     /// Public entry point used by PackagesView to reuse the streaming uninstall UI.
-    pub fn start_uninstall_by_name(&mut self, pkg_name: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start_uninstall_by_name(&mut self, pkg_name: String, purge: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.state = InstallState::Uninstalling { pkg_name: pkg_name.clone(), log: Vec::new() };
         self.open_target = None;
         self.log_list_state.reset(0);
@@ -349,7 +351,7 @@ impl InstallView {
             let name_bg = pkg_name.clone();
             let result_task = cx
                 .background_executor()
-                .spawn(async move { dpkg::remove_package_streaming(name_bg, log_tx) });
+                .spawn(async move { dpkg::remove_package_streaming(name_bg, purge, log_tx) });
 
             while let Ok(line) = log_rx.recv().await {
                 let l = line.clone();
@@ -479,13 +481,13 @@ impl Render for InstallView {
                 InstallState::LoadingInfo(path) => {
                     render_loading_info(path.to_string_lossy().to_string())
                 }
-                InstallState::FileSelected { path, info, installed_version } => {
+                InstallState::FileSelected { path, info, installed_version, purge } => {
                     let path_s = path.to_string_lossy().to_string();
                     let iv = installed_version.clone();
                     let auto_close = self.auto_close;
                     // SAFETY: borrowing different fields simultaneously is allowed
                     let inputs = &self.info_inputs;
-                    render_file_selected(path_s, info, iv, auto_close, inputs, cx)
+                    render_file_selected(path_s, info, iv, auto_close, *purge, inputs, cx)
                 }
                 InstallState::Installing { info, log } => {
                     let list_state = self.log_list_state.clone();
@@ -612,6 +614,7 @@ async fn load_deb_async(
                     path: p,
                     info: info.clone(),
                     installed_version,
+                    purge: false,
                 };
                 cx.notify();
             })
@@ -676,6 +679,7 @@ fn render_file_selected(
     info: &DebInfo,
     installed_version: Option<String>,
     auto_close: bool,
+    purge: bool,
     inputs: &InfoInputs,
     cx: &mut Context<InstallView>,
 ) -> gpui_kit::AnyElement {
@@ -819,6 +823,19 @@ fn render_file_selected(
                         })),
                 ),
         )
+        .when(installed_version.is_some(), |el| {
+            el.child(
+                Checkbox::new("purge-config")
+                    .label(tr("common.purge_config"))
+                    .checked(purge)
+                    .on_click(cx.listener(|view, checked: &bool, _window, cx| {
+                        if let InstallState::FileSelected { purge, .. } = &mut view.state {
+                            *purge = *checked;
+                        }
+                        cx.notify();
+                    })),
+            )
+        })
         .into_any_element()
 }
 

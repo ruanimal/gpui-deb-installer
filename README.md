@@ -16,6 +16,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 - **File preview** — inspect the contents of a `.deb` before installing it.
 - **Desktop integration** — accepts a package path as a command-line argument, so a `.deb` can be opened straight from the file manager's context menu.
 - **Safe privileges** — installs and removals run through `pkexec`, keeping every operation under PolicyKit control.
+- **Optional configuration cleanup** — both the Install tab and the Installed tab let you choose whether to purge package configuration files when uninstalling. The option is off by default for each package; configuration in your home directory is unaffected.
 
 ## Installed packages 📋
 

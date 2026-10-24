@@ -4,6 +4,7 @@ common:
   files: &files "Files"
   installed: &installed "Installed"
   uninstall: &uninstall "Uninstall"
+  purge_config: "Also remove package configuration files (purge)"
   cancel: &cancel "Cancel"
   package: &package "Package"
   version: &version "Version"

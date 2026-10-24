@@ -4,6 +4,7 @@ common:
   files: &files "文件"
   installed: &installed "已安装"
   uninstall: &uninstall "卸载"
+  purge_config: "同时清除软件包配置文件（purge）"
   cancel: &cancel "取消"
   package: &package "包名"
   version: &version "版本"

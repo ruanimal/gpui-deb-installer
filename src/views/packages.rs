@@ -329,8 +329,8 @@ pub struct PackagesView {
     /// Whether packages that still exist in a repository are listed too.
     include_repo: bool,
     error: Option<String>,
-    /// Package name pending uninstall confirmation.
-    confirm_target: Option<String>,
+    /// Package name and purge choice pending uninstall confirmation.
+    confirm_target: Option<(String, bool)>,
     /// Weak handle to InstallView, used to delegate the uninstall operation.
     pub install_view: Option<WeakEntity<InstallView>>,
     /// Called before uninstall starts — used by AppView to switch to the Install tab.
@@ -445,13 +445,13 @@ impl PackagesView {
     }
 
     fn start_uninstall(&mut self, name: String, cx: &mut Context<Self>) {
-        self.confirm_target = Some(name);
+        self.confirm_target = Some((name, false));
         cx.notify();
     }
 
     fn confirm_uninstall(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = match self.confirm_target.take() {
-            Some(n) => n,
+        let (name, purge) = match self.confirm_target.take() {
+            Some(target) => target,
             None => return,
         };
         cx.notify();
@@ -465,7 +465,7 @@ impl PackagesView {
         if let Some(ref install_weak) = self.install_view {
             install_weak
                 .update(cx, |install, install_cx| {
-                    install.start_uninstall_by_name(name, window, install_cx);
+                    install.start_uninstall_by_name(name, purge, window, install_cx);
                 })
                 .ok();
         }
@@ -554,8 +554,7 @@ impl Render for PackagesView {
                 )
             })
             // Confirm dialog (inline overlay)
-            .when_some(confirm_target, |el, name| {
-                let name_confirm = name.clone();
+            .when_some(confirm_target, |el, (name, purge)| {
                 el.child(
                     h_flex()
                         .gap_3()
@@ -566,21 +565,34 @@ impl Render for PackagesView {
                         .border_1()
                         .border_color(cx.theme().danger)
                         .child(
-                            div().flex_1().text_color(cx.theme().foreground).child(
-                                rust_i18n::t!(
-                                    "packages.remove_package_confirm",
-                                    pkg = name.as_str()
+                            v_flex().flex_1().min_w_0().gap_2()
+                                .child(
+                                    div().text_color(cx.theme().foreground).child(
+                                        rust_i18n::t!(
+                                            "packages.remove_package_confirm",
+                                            pkg = name.as_str()
+                                        )
+                                        .to_string(),
+                                    ),
                                 )
-                                .to_string(),
-                            ),
+                                .child(
+                                    Checkbox::new("purge-config")
+                                        .label(tr("common.purge_config"))
+                                        .checked(purge)
+                                        .on_click(cx.listener(|view, checked: &bool, _window, cx| {
+                                            if let Some((_, purge)) = &mut view.confirm_target {
+                                                *purge = *checked;
+                                            }
+                                            cx.notify();
+                                        })),
+                                ),
                         )
                         .child(
                             Button::new("confirm-yes")
                                 .danger()
                                 .with_size(Size::Small)
                                 .label(tr("packages.yes_remove"))
-                                .on_click(cx.listener(move |view, _ev, window, cx| {
-                                    view.confirm_target = Some(name_confirm.clone());
+                                .on_click(cx.listener(|view, _ev, window, cx| {
                                     view.confirm_uninstall(window, cx);
                                 })),
                         )

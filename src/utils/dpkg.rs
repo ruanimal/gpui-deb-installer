@@ -36,21 +36,22 @@ pub fn install_deb_streaming(path: PathBuf, log_tx: async_channel::Sender<String
     Ok(())
 }
 
-/// Runs `pkexec apt remove --yes`, streams stdout+stderr, returns Ok/Err.
-pub fn remove_package_streaming(name: String, log_tx: async_channel::Sender<String>) -> Result<()> {
+/// Runs `pkexec apt remove/purge --yes`, streams stdout+stderr, returns Ok/Err.
+pub fn remove_package_streaming(name: String, purge: bool, log_tx: async_channel::Sender<String>) -> Result<()> {
+    let action = if purge { "purge" } else { "remove" };
     let mut child = Command::new("pkexec")
-        .args(["stdbuf", "-oL", "-eL", "apt", "remove", "--yes"])
+        .args(["stdbuf", "-oL", "-eL", "apt", action, "--yes"])
         .arg(&name)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .context("failed to launch pkexec apt remove")?;
+        .with_context(|| format!("failed to launch pkexec apt {action}"))?;
 
     pipe_output_to_channel(child.stdout.take(), child.stderr.take(), log_tx);
 
     let status = child.wait()?;
     if !status.success() {
-        bail!("apt remove failed (exit {})", status);
+        bail!("apt {action} failed (exit {})", status);
     }
     Ok(())
 }
