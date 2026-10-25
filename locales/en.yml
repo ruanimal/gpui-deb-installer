@@ -101,6 +101,7 @@ packages:
     action: *action
   empty: "No packages installed yet."
 files_preview:
+  loading_files: "Reading archive… %{count} files available"
   idle_hint: "Inspect the files and application entries a package contains before installing."
   go_install: "Choose a package"
   loading_hint: "Preparing the file tree and previews. Larger packages may take a moment."

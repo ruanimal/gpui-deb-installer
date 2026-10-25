@@ -15,7 +15,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 - **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
 - **Distinct categories** — package section (`Section`) and desktop app categories (`Categories`) are shown separately. App categories come from visible application entries inside the selected `.deb`; multiple entries are merged and deduplicated, and missing categories are shown as unknown.
 - **Installed package management** — every package `dpkg` knows about, with search, sortable columns, install/update times and batch uninstall.
-- **File preview** — inspect the contents of a `.deb` before installing it.
+- **File preview** — inspect the contents of a `.deb` before installing it. Files appear progressively while the archive is decompressed; already listed files can be searched and previewed before loading finishes. Large XZ archives still require a full decompression pass.
 - **Desktop integration** — accepts a package path as a command-line argument, so a `.deb` can be opened straight from the file manager's context menu.
 - **Safe privileges** — installs and removals run through `pkexec`, keeping every operation under PolicyKit control.
 - **Optional automatic closing** — closes ten seconds after a successful install. Switching tabs or clicking Back cancels automatic closing for that operation, even if you switch back; the saved preference still applies to future installs.

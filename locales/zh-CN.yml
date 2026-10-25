@@ -101,6 +101,7 @@ packages:
     action: *action
   empty: "暂无已安装软件包。"
 files_preview:
+  loading_files: "正在读取软件包，已列出 %{count} 个文件…"
   idle_hint: "安装前先看看软件包包含的文件和应用入口。"
   go_install: "选择软件包"
   loading_hint: "正在准备文件目录与预览，较大的软件包可能需要稍等片刻。"

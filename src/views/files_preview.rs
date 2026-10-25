@@ -7,7 +7,7 @@ use gpui_kit::component::{
     menu::{ContextMenuExt, PopupMenuItem},
     resizable::{ResizableState, h_resizable, resizable_panel},
     spinner::Spinner,
-    tree::{TreeItem, TreeState, tree},
+    tree::{TreeEvent, TreeItem, TreeState, tree},
     v_flex,
 };
 use gpui_kit::{
@@ -15,7 +15,7 @@ use gpui_kit::{
     ParentElement, Render, SharedString, Styled, Subscription, VisualContext, WeakEntity, Window,
     div, img, prelude::FluentBuilder, px,
 };
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use super::ui;
 use crate::i18n::tr;
@@ -38,12 +38,15 @@ pub enum FilesLoadState {
 
 pub struct FilesPreviewView {
     load_state: FilesLoadState,
+    is_loading: bool,
+    load_generation: u64,
     visible_count: usize,
     path_copied: bool,
     pub on_select_package: Option<Arc<dyn Fn(&mut App)>>,
     /// Last deb path we triggered a load for (used to avoid duplicate loads)
     last_loaded_path: Option<PathBuf>,
     tree_state: Entity<TreeState>,
+    collapsed_dirs: HashSet<SharedString>,
     /// Resizable panel state for the left/right split
     resizable_state: Entity<ResizableState>,
     /// Code editor for text file preview (recreated per selected file)
@@ -78,11 +81,14 @@ impl FilesPreviewView {
 
         let mut view = Self {
             load_state: FilesLoadState::Idle,
+            is_loading: false,
+            load_generation: 0,
             visible_count: 0,
             path_copied: false,
             on_select_package: None,
             last_loaded_path: None,
-            tree_state,
+            tree_state: tree_state.clone(),
+            collapsed_dirs: HashSet::new(),
             resizable_state,
             editor_state,
             selected: None,
@@ -100,6 +106,17 @@ impl FilesPreviewView {
             },
         ));
 
+        view._subscriptions.push(cx.subscribe(&tree_state, |view, _, event, _| {
+            match event {
+                TreeEvent::Collapsed(id) => {
+                    view.collapsed_dirs.insert(id.clone());
+                }
+                TreeEvent::Expanded(id) => {
+                    view.collapsed_dirs.remove(id);
+                }
+            }
+        }));
+
         view
     }
 
@@ -109,11 +126,14 @@ impl FilesPreviewView {
 
     /// Called from AppView when the install view resets (e.g. Back button).
     pub fn reset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.load_generation = self.load_generation.wrapping_add(1);
+        self.is_loading = false;
         self.load_state = FilesLoadState::Idle;
         self.last_loaded_path = None;
         self.selected = None;
         self.path_copied = false;
         self.visible_count = 0;
+        self.collapsed_dirs.clear();
         self.tree_state
             .update(cx, |state, cx| state.set_items(vec![], cx));
         self.editor_state
@@ -131,11 +151,15 @@ impl FilesPreviewView {
         if self.last_loaded_path.as_ref() == Some(&path) {
             return; // already loaded this file
         }
+        self.load_generation = self.load_generation.wrapping_add(1);
+        let generation = self.load_generation;
+        self.is_loading = true;
         self.last_loaded_path = Some(path.clone());
         self.load_state = FilesLoadState::Loading;
         self.selected = None;
         self.path_copied = false;
         self.visible_count = 0;
+        self.collapsed_dirs.clear();
 
         // Reset search
         self.search_state.update(cx, |s, cx| {
@@ -155,7 +179,7 @@ impl FilesPreviewView {
         cx.notify();
 
         cx.spawn_in(window, async move |weak, cx| {
-            load_files_async(path, weak, cx).await;
+            load_files_async(path, generation, weak, cx).await;
         })
         .detach();
     }
@@ -206,6 +230,13 @@ impl FilesPreviewView {
         cx.notify();
     }
 
+    fn loaded_file_count(&self) -> usize {
+        match &self.load_state {
+            FilesLoadState::Loaded(extracted) => extracted.entries.len(),
+            _ => 0,
+        }
+    }
+
     fn update_tree_filter(&mut self, cx: &mut Context<Self>) {
         let search_text = self.search_state.read(cx).text().to_string().to_lowercase();
         let entries = match &self.load_state {
@@ -215,7 +246,7 @@ impl FilesPreviewView {
 
         let items = if search_text.is_empty() {
             self.visible_count = entries.len();
-            build_tree_items_clean(entries)
+            build_tree_items_clean(entries, &self.collapsed_dirs)
         } else {
             let filtered: Vec<DebFileEntry> = entries
                 .iter()
@@ -223,11 +254,14 @@ impl FilesPreviewView {
                 .cloned()
                 .collect();
             self.visible_count = filtered.len();
-            build_tree_items_clean(&filtered)
+            build_tree_items_clean(&filtered, &self.collapsed_dirs)
         };
 
         self.tree_state.update(cx, |state, cx| {
+            let selected_id = state.selected_item().map(|item| item.id.clone());
             state.set_items(items, cx);
+            let selected_ix = selected_id.and_then(|id| state.index_of(&id));
+            state.set_selected_index(selected_ix, cx);
         });
         cx.notify();
     }
@@ -351,6 +385,12 @@ impl Render for FilesPreviewView {
                                     .py_2()
                                     .border_b_1()
                                     .border_color(cx.theme().border)
+                                    .when(self.is_loading, |el| el.child(
+                                        h_flex().gap_2().pb_2().text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(Spinner::new())
+                                            .child(rust_i18n::t!("files_preview.loading_files", count = self.loaded_file_count()).to_string())
+                                    ))
                                     .child(
                                         Input::new(&self.search_state)
                                             .w_full()
@@ -535,88 +575,103 @@ impl FilesPreviewView {
 
 async fn load_files_async(
     path: PathBuf,
+    generation: u64,
     weak: WeakEntity<FilesPreviewView>,
     cx: &mut AsyncWindowContext,
 ) {
     let loaded_path = path.clone();
-    let result = cx
-        .background_executor()
+    // Backpressure bounds snapshot memory if the UI is busy. Dropping the
+    // receiver cancels an obsolete worker at its next progress update.
+    let (tx, rx) = async_channel::bounded(1);
+    cx.background_executor()
         .spawn(async move {
-            let extracted = crate::utils::deb_files::extract_previewable_files(&path)?;
-            let categories = crate::utils::deb_files::desktop_categories(&extracted.entries);
-            Ok::<_, anyhow::Error>((extracted, categories))
+            let result = crate::utils::deb_files::extract_previewable_files(&path, |snapshot| {
+                tx.send_blocking(Ok((snapshot, false))).is_ok()
+            });
+            let _ = tx.send_blocking(result.map(|extracted| (extracted, true)));
         })
-        .await;
+        .detach();
 
-    // Ignore a completion after reset or selection of a different package.
-    let is_current = weak
-        .read_with(cx, |view, _| {
-            view.last_loaded_path.as_ref() == Some(&loaded_path)
-        })
-        .unwrap_or(false);
-    if !is_current {
-        return;
-    }
-    let callback = weak
-        .read_with(cx, |view, _| view.on_categories_loaded.clone())
-        .ok()
-        .flatten();
-    let categories = result
-        .as_ref()
-        .map(|(_, categories)| categories.clone())
-        .unwrap_or_default();
-    if let Some(callback) = callback {
-        cx.update(|window, cx| callback(loaded_path, categories, window, cx))
-            .ok();
-    }
-
-    match result {
-        Ok((extracted, _)) => {
-            let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
-            let count = extracted.entries.len();
-
-            weak.update(cx, |view, cx| {
-                view.load_state = FilesLoadState::Loaded(extracted);
-                view.selected = None;
-                view.update_tree_filter(cx);
-            })
-            .ok();
-
-            if let Some(state) = search_state {
-                cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(
-                        SharedString::from(
-                            rust_i18n::t!("files_preview.search_files", count = count).to_string(),
-                        ),
-                        w,
-                        c,
-                    )
-                })
-                .ok();
-            }
+    while let Ok(result) = rx.recv().await {
+        let is_current = weak
+            .read_with(cx, |view, _| view.load_generation == generation)
+            .unwrap_or(false);
+        if !is_current {
+            return;
         }
-        Err(e) => {
-            let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
-            let err_msg = e.to_string();
-
-            weak.update(cx, |view, cx| {
-                view.load_state = FilesLoadState::Error(err_msg.clone());
-                cx.notify();
-            })
-            .ok();
-
-            if let Some(state) = search_state {
-                cx.update_window_entity(&state, |s: &mut InputState, w, c| {
-                    s.set_placeholder(
-                        SharedString::from(
-                            rust_i18n::t!("files_preview.error", err = err_msg.as_str())
-                                .to_string(),
-                        ),
-                        w,
-                        c,
-                    )
+        match result {
+            Ok((extracted, complete)) => {
+                if complete {
+                    let categories =
+                        crate::utils::deb_files::desktop_categories(&extracted.entries);
+                    let callback = weak
+                        .read_with(cx, |view, _| view.on_categories_loaded.clone())
+                        .ok()
+                        .flatten();
+                    if let Some(callback) = callback {
+                        cx.update(|window, cx| {
+                            callback(loaded_path.clone(), categories, window, cx)
+                        })
+                        .ok();
+                    }
+                }
+                let count = extracted.entries.len();
+                let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
+                weak.update(cx, |view, cx| {
+                    view.is_loading = !complete;
+                    view.load_state = FilesLoadState::Loaded(extracted);
+                    view.update_tree_filter(cx);
                 })
                 .ok();
+                if let Some(state) = search_state {
+                    cx.update_window_entity(&state, |s: &mut InputState, w, c| {
+                        s.set_placeholder(
+                            SharedString::from(
+                                rust_i18n::t!("files_preview.search_files", count = count)
+                                    .to_string(),
+                            ),
+                            w,
+                            c,
+                        )
+                    })
+                    .ok();
+                }
+                if complete {
+                    return;
+                }
+            }
+            Err(e) => {
+                let callback = weak
+                    .read_with(cx, |view, _| view.on_categories_loaded.clone())
+                    .ok()
+                    .flatten();
+                if let Some(callback) = callback {
+                    cx.update(|window, cx| callback(loaded_path.clone(), Vec::new(), window, cx))
+                        .ok();
+                }
+                let search_state = weak.read_with(cx, |v, _| v.search_state.clone()).ok();
+                let err_msg = e.to_string();
+                weak.update(cx, |view, cx| {
+                    view.is_loading = false;
+                    view.selected = None;
+                    view.load_state = FilesLoadState::Error(err_msg.clone());
+                    cx.notify();
+                })
+                .ok();
+                if let Some(state) = search_state {
+                    cx.update_window_entity(&state, |s: &mut InputState, w, c| {
+                        s.set_placeholder(
+                            SharedString::from(
+                                rust_i18n::t!("files_preview.error", err = err_msg.as_str())
+                                    .to_string(),
+                            ),
+                            w,
+                            c,
+                        )
+                    })
+                    .ok();
+                }
+                return;
             }
         }
     }
@@ -626,7 +681,10 @@ async fn load_files_async(
 // Tree building (two-pass, parent-before-child order)
 // ---------------------------------------------------------------------------
 
-fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
+fn build_tree_items_clean(
+    entries: &[DebFileEntry],
+    collapsed_dirs: &HashSet<SharedString>,
+) -> Vec<TreeItem> {
     use std::collections::{BTreeMap, BTreeSet};
 
     // Collect all implied directory paths
@@ -700,6 +758,7 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
     fn build(
         parent: &str,
         child_map: &BTreeMap<String, Vec<(String, bool, String)>>,
+        collapsed_dirs: &HashSet<SharedString>,
     ) -> Vec<TreeItem> {
         let Some(children) = child_map.get(parent) else {
             return vec![];
@@ -721,10 +780,10 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
                         }
                     }
 
-                    let sub = build(&current_path, child_map);
+                    let sub = build(&current_path, child_map, collapsed_dirs);
                     TreeItem::new(current_path.clone(), current_name)
                         .children(sub)
-                        .expanded(true)
+                        .expanded(!collapsed_dirs.contains(current_path.as_str()))
                 } else {
                     TreeItem::new(full_path.clone(), name.clone())
                 }
@@ -732,7 +791,7 @@ fn build_tree_items_clean(entries: &[DebFileEntry]) -> Vec<TreeItem> {
             .collect()
     }
 
-    build("", &child_map)
+    build("", &child_map, collapsed_dirs)
 }
 
 // ---------------------------------------------------------------------------

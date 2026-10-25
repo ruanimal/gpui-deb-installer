@@ -1,7 +1,9 @@
-use anyhow::{Context, Result};
-use std::io::Read;
+use anyhow::{Context, Result, bail};
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -31,24 +33,26 @@ pub struct DebFileEntry {
 }
 
 /// Result of extracting a .deb: the entry list plus the temp directory handle.
-/// The temp directory is deleted when this struct is dropped.
+/// The temp directory is deleted when the last snapshot is dropped.
+#[derive(Clone)]
 pub struct ExtractedDeb {
     pub entries: Vec<DebFileEntry>,
-    /// Keep alive — dropping this removes the temp directory.
-    pub _temp_dir: TempDir,
+    /// Keep alive until the worker and all UI snapshots have been dropped.
+    pub _temp_dir: Arc<TempDir>,
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Spawn `dpkg --fsys-tarfile <path>`, extract previewable files to a temp
-/// directory, and return lightweight metadata entries.
-///
+/// Stream preview metadata while decompressing the archive. Returning false from
+/// `on_progress` cancels extraction. Snapshots keep their cached files alive.
 /// This is a **blocking** function — call from a background executor.
-pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
-    let temp_dir = TempDir::new().context("failed to create temp directory")?;
-
+pub fn extract_previewable_files(
+    path: &Path,
+    mut on_progress: impl FnMut(ExtractedDeb) -> bool,
+) -> Result<ExtractedDeb> {
+    let temp_dir = Arc::new(TempDir::new().context("failed to create temp directory")?);
     let mut child = Command::new("dpkg")
         .arg("--fsys-tarfile")
         .arg(path)
@@ -56,17 +60,31 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
         .stderr(Stdio::null())
         .spawn()
         .context("failed to spawn dpkg --fsys-tarfile")?;
-
     let stdout = child.stdout.take().context("no stdout")?;
+    let result = read_preview_archive(stdout, temp_dir, &mut on_progress);
+    if result.is_err() {
+        // Close the pipe and reap dpkg even when parsing fails or is cancelled.
+        let _ = child.kill();
+    }
+    let status = child.wait().context("failed to wait for dpkg")?;
+    let extracted = result?;
+    if !status.success() {
+        bail!("dpkg --fsys-tarfile failed: {status}");
+    }
+    Ok(extracted)
+}
 
-    let mut archive = tar::Archive::new(stdout);
+fn read_preview_archive(
+    reader: impl Read,
+    temp_dir: Arc<TempDir>,
+    on_progress: &mut impl FnMut(ExtractedDeb) -> bool,
+) -> Result<ExtractedDeb> {
+    let mut archive = tar::Archive::new(BufReader::with_capacity(256 * 1024, reader));
     let mut entries_out: Vec<DebFileEntry> = Vec::new();
+    let mut last_progress = None;
 
     for entry_result in archive.entries()? {
-        let mut entry = match entry_result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
+        let mut entry = entry_result.context("failed to read archive entry")?;
 
         let header = entry.header();
 
@@ -84,36 +102,25 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
 
         let file_size = header.size().unwrap_or(0);
 
-        // Skip known binary extensions or oversized files
-        if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES as u64 {
-            entries_out.push(DebFileEntry {
-                path: raw_path,
-                kind: DebFileKind::Unsupported,
-                size: file_size,
-                cache_path: None,
-            });
-            continue;
-        }
-
-        // Read content to classify
-        let mut buf = Vec::with_capacity(file_size as usize);
-        entry.read_to_end(&mut buf).unwrap_or_default();
-
-        let kind = categorize(&raw_path, &buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
-
-        let cache_path = match &kind {
-            DebFileKind::Unsupported => None,
-            _ => {
-                // Write to temp dir, preserving relative path structure
-                let rel = raw_path.trim_start_matches("./");
-                let dest = temp_dir.path().join(rel);
-                if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).ok();
-                }
-                std::fs::write(&dest, &buf).ok();
-                Some(dest)
-            }
-        };
+        let (kind, cache_path) =
+            if is_known_binary_ext(&raw_path) || file_size > MAX_IMAGE_BYTES as u64 {
+                (DebFileKind::Unsupported, None)
+            } else {
+                let mut buf = Vec::with_capacity(file_size as usize);
+                entry
+                    .read_to_end(&mut buf)
+                    .context("failed to read preview content")?;
+                let kind = categorize(&raw_path, &buf, MAX_TEXT_BYTES, MAX_IMAGE_BYTES);
+                let cache_path = if matches!(kind, DebFileKind::Unsupported) {
+                    None
+                } else {
+                    // Flat cache names avoid per-directory I/O and unsafe archive paths.
+                    let dest = temp_dir.path().join(entries_out.len().to_string());
+                    std::fs::write(&dest, &buf).context("failed to cache preview content")?;
+                    Some(dest)
+                };
+                (kind, cache_path)
+            };
 
         entries_out.push(DebFileEntry {
             path: raw_path,
@@ -121,9 +128,21 @@ pub fn extract_previewable_files(path: &Path) -> Result<ExtractedDeb> {
             size: file_size,
             cache_path,
         });
+
+        // Publish the first file immediately, then throttle full snapshots.
+        if last_progress.is_none_or(|last: Instant| last.elapsed() >= Duration::from_millis(250)) {
+            if !on_progress(ExtractedDeb {
+                entries: entries_out.clone(),
+                _temp_dir: temp_dir.clone(),
+            }) {
+                bail!("preview extraction cancelled");
+            }
+            last_progress = Some(Instant::now());
+        }
     }
 
-    let _ = child.wait();
+    // tar stops at its end marker; drain any padding before waiting for dpkg.
+    std::io::copy(&mut archive.into_inner(), &mut std::io::sink())?;
 
     Ok(ExtractedDeb {
         entries: entries_out,
@@ -294,6 +313,82 @@ fn is_image_magic(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn preview_archive() -> Vec<u8> {
+        let mut archive = tar::Builder::new(Vec::new());
+        for (path, data) in [
+            ("usr/share/example/readme.txt", b"hello".as_slice()),
+            ("usr/share/example/icon.png", b"\x89PNGexample".as_slice()),
+            ("usr/lib/example.bin", b"\0binary".as_slice()),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            archive.append_data(&mut header, path, data).unwrap();
+        }
+        archive.into_inner().unwrap()
+    }
+
+    #[test]
+    fn progress_previews_stay_readable_and_archive_padding_is_drained() {
+        let mut bytes = preview_archive();
+        bytes.extend_from_slice(&[0; 65536]);
+        let mut reader = std::io::Cursor::new(bytes);
+        let mut first_snapshot = None;
+        let extracted = read_preview_archive(
+            &mut reader,
+            Arc::new(tempfile::tempdir().unwrap()),
+            &mut |snapshot| {
+                if first_snapshot.is_none() {
+                    assert_eq!(snapshot.entries.len(), 1);
+                    assert_eq!(read_cached_file(&snapshot.entries[0]).unwrap(), b"hello");
+                    first_snapshot = Some(snapshot);
+                }
+                true
+            },
+        )
+        .unwrap();
+        assert_eq!(reader.position(), reader.get_ref().len() as u64);
+        assert_eq!(extracted.entries.len(), 3);
+        assert!(matches!(extracted.entries[1].kind, DebFileKind::Image));
+        assert!(matches!(
+            extracted.entries[2].kind,
+            DebFileKind::Unsupported
+        ));
+        assert!(extracted.entries[2].cache_path.is_none());
+        let cache_dir = extracted._temp_dir.path().to_owned();
+        drop(extracted);
+        let snapshot = first_snapshot.unwrap();
+        assert_eq!(read_cached_file(&snapshot.entries[0]).unwrap(), b"hello");
+        drop(snapshot);
+        assert!(!cache_dir.exists());
+    }
+
+    #[test]
+    fn cancelled_or_truncated_archives_do_not_succeed() {
+        let bytes = preview_archive();
+        let result = read_preview_archive(
+            bytes.as_slice(),
+            Arc::new(tempfile::tempdir().unwrap()),
+            &mut |_| false,
+        );
+        assert!(result.err().unwrap().to_string().contains("cancelled"));
+        // The first member declares five bytes, but only two are available.
+        let result = read_preview_archive(
+            &bytes[..514],
+            Arc::new(tempfile::tempdir().unwrap()),
+            &mut |_| true,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn failed_dpkg_does_not_look_like_an_empty_package() {
+        let invalid = tempfile::NamedTempFile::new().unwrap();
+        let result = extract_previewable_files(invalid.path(), |_| true);
+        assert!(result.is_err());
+    }
 
     #[test]
     fn categories_come_only_from_the_application_group() {
