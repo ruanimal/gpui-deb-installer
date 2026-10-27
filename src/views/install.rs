@@ -815,7 +815,7 @@ async fn load_deb_async(
         .background_executor()
         .spawn(async move {
             let info = deb_reader::read_deb_info(&path)?;
-            let installed = dpkg::installed_version(&info.name);
+            let installed = dpkg::installed_version(&info.name, &info.architecture);
             Ok::<_, anyhow::Error>((info, installed))
         })
         .await;
