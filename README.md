@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | **English**
 
-A fast, lightweight graphical installer for `.deb` packages, built with `gpui-kit 0.11.0` and the [GPUI Fast](https://github.com/longbridge/gpui-fast) backend.
+A fast, lightweight graphical installer for `.deb` packages, built with `gpui-kit` and the [GPUI Fast](https://github.com/longbridge/gpui-fast) backend.
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)

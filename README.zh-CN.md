@@ -2,7 +2,7 @@
 
 **中文** | [English](README.md)
 
-一个使用 `gpui-kit 0.11.0` 和 [GPUI Fast](https://github.com/longbridge/gpui-fast) 后端构建的轻量级图形化 `.deb` 软件包安装器。
+一个使用 `gpui-kit` 和 [GPUI Fast](https://github.com/longbridge/gpui-fast) 后端构建的轻量级图形化 `.deb` 软件包安装器。
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)
