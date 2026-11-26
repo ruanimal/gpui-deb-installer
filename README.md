@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md) | **English**
 
-A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](https://www.gpui.rs/) through `gpui-kit 0.7.3`.
+A fast, lightweight graphical installer for `.deb` packages, built with `gpui-kit 0.11.0` and the [GPUI Fast](https://github.com/longbridge/gpui-fast) backend.
 
 ![Screenshot](screenshot.png)
 ![Screenshot2](screenshot2.png)
@@ -11,7 +11,7 @@ A fast, lightweight graphical installer for `.deb` packages, built with [GPUI](h
 ## Features ✨
 
 - **Refined workspace** — theme-aware cards, a single compact navigation bar and a scrollable detail panel with pinned install actions. Package status sits beside the summary, and file previews open directly without repeated page headings. Drop one `.deb` onto the welcome screen to open it; copy operation output and preview paths with one click. File previews include loading, empty, error and retry states. Redesigned parcel artwork gives the desktop icon and in-app identity the same indigo palette. A toolbar control switches between light and dark themes; uninstalling from package details now asks for confirmation.
-- **Fast and fluid** — GPU-accelerated rendering via GPUI keeps the UI instantly responsive.
+- **Fast and fluid** — GPUI Fast provides GPU-accelerated rendering.
 - **Full package details** — name, version, description, maintainer, installed size, dependencies and more.
 - **Install, reinstall, upgrade and downgrade** — reinstalling the same version unpacks the selected `.deb` again. Installed status and version are checked for the package's architecture; removed packages with residual configuration are shown as not installed.
 - **Distinct categories** — package section (`Section`) and desktop app categories (`Categories`) are shown separately. App categories come from visible application entries inside the selected `.deb`; multiple entries are merged and deduplicated, and missing categories are shown as unknown.
